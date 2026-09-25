@@ -74,4 +74,4 @@ python scripts/vit_ssl/run.py ../my_dataset configs/vit_ssl_small_config.yaml al
 - ViT-MAE：`result_metafi_ssl/vit/`。
 - 汇总报告：`reports/RESULTS_SUMMARY.{md,csv,json}`；需要手动刷新时运行 `python scripts/report_results.py`。
 
-以上目录均为运行后产生的本地文件，已被 `.gitignore` 排除，不应提交到 GitHub。未附权重时需重新预训练，不能直接跳过预训练运行微调。
+
