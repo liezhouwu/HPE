@@ -1,0 +1,167 @@
+# Standalone small-sample SSL configuration.
+# Full SSL uses configs/ssl_config.yaml; small uses this file only.
+
+dataset_root: ../my_dataset
+baseline_config: configs/baseline_config.yaml
+device: cuda
+protocol: protocol2
+single_split: random_split
+all_splits:
+- random_split
+- cross_subject_split
+- cross_scene_split
+scope: strict
+seed: 42
+label_budget: 1shot
+official_alignment: true
+pretrain:
+  epochs: 10
+  max_batches: null
+  log_every_batches: 50
+  micro_batch: 32
+  gradient_accumulation: 2
+  num_workers: 0
+  amp: true
+  profile_cuda: false
+  optimizer: adamw #sgd adamw
+  sgd_momentum: 0.9
+  pretrain_lr: 0.0005
+  weight_decay: 0.0001
+  scheduler: multistep
+  scheduler_t_max: 100
+  lr_milestones:
+  - 6
+  - 8
+  lr_gamma: 0.1
+  lr_min: 1.0e-05
+supervised:
+  epochs: 25
+  num_workers: 0
+  val_every: 5
+  amp: true
+  optimizer: adamw
+  learning_rate: 0.0003
+  weight_decay: 0.0
+  sgd_momentum: 0.9
+  scheduler: cosine
+  lr_warmup_epochs: 0
+  lr_min: 1.0e-06
+  lr_milestones:
+  - 20
+  - 40
+  - 60
+  - 80
+  lr_gamma: 0.5
+  strategy: matched
+  strategy_params:
+    sup_decoder_lr: 0.0001
+    sup_encoder_layer12_lr: 5.0e-06
+    sup_encoder_layer3_lr: 1.0e-05
+    sup_encoder_high_lr: 3.0e-05
+finetune:
+  epochs: 25
+  num_workers: 0
+  val_every: 5
+  amp: true
+  optimizer: adamw
+  learning_rate: 0.0003
+  weight_decay: 0.0
+  sgd_momentum: 0.9
+  scheduler: cosine
+  lr_warmup_epochs: 0
+  lr_min: 1.0e-06
+  lr_milestones:
+  - 20
+  - 40
+  - 60
+  - 80
+  lr_gamma: 0.5
+  strategy: matched
+  strategy_params:
+    transfer_decoder_warmup_lr: 0.0003
+    transfer_decoder_lr: 0.0001
+    transfer_encoder_layer12_lr: 5.0e-06
+    transfer_encoder_layer3_lr: 1.0e-05
+    transfer_encoder_high_lr: 3.0e-05
+methods:
+  simclr:
+    temperature: 0.1
+    projector_hidden_dim: 512
+    projector_out_dim: 128
+    temporal_weights:
+      1: 0.25
+      2: 0.1
+    augmentation:
+      jitter_sigma: 0.001
+      amplitude_scale_range:
+      - 0.95
+      - 1.05
+      time_mask_width: 1
+      subcarrier_mask_width: 4
+      max_time_shift: 1
+  moco:
+    projector_dim: 128
+    projector_hidden_dim: 512
+    queue_size: 16384 #32768
+    momentum: 0.999
+    temperature: 0.2
+    temporal_lambda: 0.2
+    temporal_weights:
+      1: 0.25
+      2: 0.1
+    augmentation:
+      jitter_sigma: 0.001
+      amplitude_scale_range:
+      - 0.95
+      - 1.05
+      time_mask_width: 1
+      subcarrier_mask_width: 4
+      max_time_shift: 1
+  swav:
+    view_policy: 8gb
+    projector_hidden_dim: 512
+    projector_out_dim: 128
+    n_prototypes: 256
+    temperature: 0.1
+    sinkhorn_epsilon: 0.05
+    sinkhorn_iterations: 3
+    temporal_lambda: 0.2
+    temporal_weights:
+      1: 0.25
+      2: 0.1
+    augmentation:
+      jitter_sigma: 0.001
+      amplitude_scale_range:
+      - 0.95
+      - 1.05
+      time_mask_width: 1
+      subcarrier_mask_width: 4
+      max_time_shift: 1
+  relpos:
+    hidden_dim: 256
+    temporal_consistency: false
+    temporal_coefficient: 0.2
+  mfm:
+    objective: feature
+    mask_ratio: 0.4
+    mask_modes:
+    - joint
+    - time
+    - subcarrier
+    ema_momentum: 0.996
+    ema_schedule: constant
+    predictor_hidden_dim: 256
+    masked_region_weight: 2.0
+    raw_decoder_hidden_dim: 64
+  mae:
+    mask_ratio: 0.75
+    patch_height: 6
+    patch_width: 5
+    decoder_hidden_dim: 256
+    patch_norm: true
+    use_mask_token: true
+small_sample:
+  pretrain_sequence_fraction: 0.2
+  pretrain_epochs: 10
+  supervised_epochs: 25
+  finetune_epochs: 25

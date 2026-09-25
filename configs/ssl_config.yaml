@@ -1,0 +1,167 @@
+# 官方 MetaFi++ backbone 上的 SSL 唯一配置文件。
+# 监督对照：python scripts/run.py ssl supervised single
+# SSL 单划分：python scripts/run.py ssl simclr single
+# SSL 全划分：python scripts/run.py ssl simclr all
+
+# 数据集根目录；可填相对 try3 的路径或绝对路径。
+dataset_root: ../my_dataset  # 可选：任意有效 MMFi 数据集根目录。
+# 基线配置路径；SSL 数据审计、监督对照和微调都使用它定义官方划分和模型骨架。
+baseline_config: configs/baseline_config.yaml  # 可选：通常保持此路径。
+# 运行设备。
+device: cuda  # 可选：cuda、cuda:0、cpu。
+# 默认实验协议。
+protocol: protocol2
+# 可选：protocol1、protocol2、protocol3。
+# single 命令默认训练的划分；可被 --split 覆盖。
+single_split: random_split  # 可选：random_split、cross_subject_split、cross_scene_split。
+# all 命令依次训练的划分列表；可配置任意非空子集。
+all_splits: [random_split, cross_subject_split, cross_scene_split]  # 可选项同 single_split。
+# 无标签数据使用范围。
+scope: strict  # 可选：strict、transductive；主实验建议 strict。
+# 随机种子；标签抽样、SSL 初始化和微调初始化共同使用。
+seed: 42  # 可选：非负整数。
+# 下游可用标注预算；按每个动作的完整序列计，不是按帧计。
+label_budget: 4shot  # Allowed: 1shot, 2shot, 4shot, 8shot, 16shot, 100%, or Nsubjects (for example 4subjects).
+# 标记该 SSL 实验复用官方 MetaFi++ backbone。
+official_alignment: true  # 可选：true、false；try3 中应保持 true。
+
+# ===== 所有 SSL 方法共用的预训练设置 =====
+pretrain:  # 可修改：任何 SSL 方法的预训练运行参数。
+  epochs: 100  # 可选：正整数；预训练总 epoch 数。
+  max_batches: null  # 可选：null 或正整数；null 表示完整 epoch，调试可设 10、100。
+  log_every_batches: 50  # 可选：正整数；每隔多少个 batch 输出一次 loss。
+  micro_batch: 20  # 可选：正整数；单次前向 batch，显存不足时减为 4、2。
+  gradient_accumulation: 1  # 可选：正整数；有效 batch = micro_batch × 此值。
+  num_workers: 0  # 可选：0 或正整数；Windows 建议先用 0。
+  amp: true  # 可选：true、false；CUDA 上 true 通常更快且节省显存。
+  profile_cuda: false  # 可选：true、false；true 会先探测安全 micro batch，正式长跑可按需开启。
+  # --- 优化器配置 ---
+  optimizer: adamw  # 可选：adamw（自适应学习率）、sgd（随机梯度下降）。
+  sgd_momentum: 0.9  # 可选：0 到 1 之间的小数；仅 optimizer=sgd 时生效，控制 SGD 动量。
+  pretrain_lr: 0.0001  # 可选：正数；初始学习率，AdamW 典型值 1e-4，SGD 典型值 1e-2。
+  weight_decay: 0.0001  # 可选：非负小数；L2 权重衰减，防止过拟合。
+  # --- 学习率调度器配置 ---
+  scheduler: cosine  # 可选：cosine（余弦退火）、multistep（阶梯衰减）、constant（恒定学习率）。
+  scheduler_t_max: 100  # 可选：正整数；仅 scheduler=cosine 时使用，余弦调度的周期长度，通常等于 epochs。
+  lr_milestones: [60, 80]  # 可选：递增整数列表；仅 scheduler=multistep 时使用，在这些 epoch 处衰减学习率。
+  lr_gamma: 0.1  # 可选：0 到 1 之间的小数；仅 scheduler=multistep 时使用，到达 milestone 时学习率乘以此系数。
+
+# ===== 随机初始化监督对照 =====
+supervised:  # 可修改：python scripts/run.py ssl supervised single|all 的参数。
+  epochs: 100  # 可选：正整数；下游监督训练 epoch 数。
+  num_workers: 0  # 可选：0 或正整数。
+  val_every: 5  # 可选：正整数；每隔多少 epoch 验证一次。
+  amp: true  # 可选：true、false。
+  # --- 优化器配置 ---
+  optimizer: adamw  # 可选：adamw（自适应学习率）、sgd（随机梯度下降）。
+  learning_rate: 0.0003  # 可选：正数；基础学习率，仅 strategy=matched 时直接使用，典型值 3e-4。
+  weight_decay: 0.0  # 可选：非负小数；L2 权重衰减，监督训练通常设为 0。
+  sgd_momentum: 0.9  # 可选：0 到 1 之间的小数；仅 optimizer=sgd 时生效。
+  # --- 学习率调度器配置 ---
+  scheduler: cosine  # 可选：cosine（余弦退火）、multistep（阶梯衰减）、constant（恒定学习率）。
+  lr_warmup_epochs: 0  # 可选：非负整数；学习率预热的 epoch 数，从 0 线性增长到目标学习率。
+  lr_min: 0.000001  # 可选：非负小数；仅 scheduler=cosine 时使用，余弦调度的最小学习率下界。
+  lr_milestones: [20, 40, 60, 80]  # 可选：递增整数列表；仅 scheduler=multistep 时使用。
+  lr_gamma: 0.5  # 可选：0 到 1 之间的小数；仅 scheduler=multistep 时使用。
+  # --- 微调策略配置 ---
+  strategy: matched  # 可选：matched（全模型统一学习率）、sup-differential-lr（分层差分学习率）。
+  strategy_params:  # 策略超参数，仅 strategy=sup-differential-lr 时使用。
+    sup_decoder_lr: 0.0001  # decoder（姿态解码头）学习率，任务特定层使用较大学习率。
+    sup_encoder_layer12_lr: 0.000005  # encoder layer1-2（浅层）学习率，通用特征层使用较小学习率。
+    sup_encoder_layer3_lr: 0.00001  # encoder layer3（中层）学习率。
+    sup_encoder_high_lr: 0.00003  # encoder layer4（高层）学习率，高层语义特征使用中等学习率。
+
+# ===== SSL 预训练后的微调 =====
+finetune:  # 可修改：SSL encoder 的下游微调参数。
+  epochs: 100  # 可选：正整数。
+  num_workers: 0  # 可选：0 或正整数。
+  val_every: 5  # 可选：正整数。
+  amp: true  # 可选：true、false。
+  # --- 优化器配置 ---
+  optimizer: adamw  # 可选：adamw（自适应学习率）、sgd（随机梯度下降）。
+  learning_rate: 0.0003  # 可选：正数；基础学习率，仅 strategy=matched 时直接使用，典型值 3e-4。
+  weight_decay: 0.0  # 可选：非负小数；L2 权重衰减，微调通常设为 0 以保留预训练知识。
+  sgd_momentum: 0.9  # 可选：0 到 1 之间的小数；仅 optimizer=sgd 时生效。
+  # --- 学习率调度器配置 ---
+  scheduler: cosine  # 可选：cosine（余弦退火）、multistep（阶梯衰减）、constant（恒定学习率）。
+  lr_warmup_epochs: 0  # 可选：非负整数；学习率预热的 epoch 数。
+  lr_min: 0.000001  # 可选：非负小数；仅 scheduler=cosine 时使用，余弦调度的最小学习率下界。
+  lr_milestones: [20, 40, 60, 80]  # 可选：递增整数列表；仅 scheduler=multistep 时使用。
+  lr_gamma: 0.5  # 可选：0 到 1 之间的小数；仅 scheduler=multistep 时使用。
+  # --- 微调策略配置 ---
+  strategy: matched  # 可选：matched（全模型统一学习率）、transfer（三阶段渐进解冻 + 分层学习率）。
+  strategy_params:  # 策略超参数，仅 strategy=transfer 时使用。
+    # Transfer 策略三阶段说明：
+    # 阶段 1 (epoch 0-2)：仅训练 decoder，冻结 encoder，让随机初始化的 decoder 适配预训练特征。
+    # 阶段 2 (epoch 3-7)：训练 encoder.layer4 + decoder，逐步解冻高层语义特征。
+    # 阶段 3 (epoch 8+)：训练全模型，使用分层差分学习率，深层高学习率，浅层低学习率保留预训练知识。
+    transfer_decoder_warmup_lr: 0.0003  # 阶段 1 的 decoder 学习率，较大以快速适配。
+    transfer_decoder_lr: 0.0001  # 阶段 2-3 的 decoder 学习率，降低以稳定训练。
+    transfer_encoder_layer12_lr: 0.000005  # encoder layer1-2（浅层）学习率，最小以保护通用特征。
+    transfer_encoder_layer3_lr: 0.00001  # encoder layer3（中层）学习率。
+    transfer_encoder_high_lr: 0.00003  # encoder layer4（高层）学习率，较大以快速适配任务。
+
+
+methods:  # 可选方法：simclr、moco、swav、relpos、mfm、mae。
+  simclr:  # SimCLR 对比学习配置。
+    temperature: 0.1  # 可选：正数；InfoNCE 温度，常用 0.05、0.1、0.2。
+    projector_hidden_dim: 512  # 可选：正整数；投影头隐藏维度。
+    projector_out_dim: 128  # 可选：正整数；投影表示维度。
+    temporal_weights: {1: 0.25, 2: 0.10}  # 可选：帧偏移到权重的字典；例如 {1: 0.25}，空字典表示不加时间正样本。
+    augmentation:  # SimCLR 两视图 CSI 增强参数。
+      jitter_sigma: 0.001  # 可选：非负小数；高斯抖动标准差，0 表示关闭。
+      amplitude_scale_range: [0.95, 1.05]  # 可选：[最小值, 最大值]；必须为正且最小值不大于最大值。
+      time_mask_width: 1  # 可选：非负整数；时间维遮挡宽度，0 表示关闭。
+      subcarrier_mask_width: 4  # 可选：非负整数；子载波维遮挡宽度，0 表示关闭。
+      max_time_shift: 1  # 可选：非负整数；最大时间平移帧数，0 表示关闭。
+  moco:  # MoCo 动量编码器与队列配置。
+    projector_dim: 128  # 可选：正整数；投影表示维度。
+    projector_hidden_dim: 512  # 可选：正整数；投影头隐藏维度。
+    queue_size: 16384  # 可选：正整数；负样本队列长度，显存不足可改为 16384、32768。,6553665536
+    momentum: 0.999  # 可选：0 到 1 之间的小数；key encoder 的 EMA 动量。
+    temperature: 0.2  # 可选：正数；对比损失温度。
+    temporal_lambda: 0.2  # 可选：非负小数；时间一致性损失总系数，0 表示关闭。
+    temporal_weights: {1: 0.25, 2: 0.10}  # 可选：帧偏移到时间正样本权重的字典。
+    augmentation:  # MoCo 两视图 CSI 增强参数。
+      jitter_sigma: 0.001  # 可选：非负小数；0 表示关闭。
+      amplitude_scale_range: [0.95, 1.05]  # 可选：[最小值, 最大值]；正数有序范围。
+      time_mask_width: 1  # 可选：非负整数；0 表示关闭。
+      subcarrier_mask_width: 4  # 可选：非负整数；0 表示关闭。
+      max_time_shift: 1  # 可选：非负整数；0 表示关闭。
+  swav:  # SwAV 聚类式自监督配置。
+    view_policy: 8gb  # 可选：8gb、high_resource；8gb 适合当前 8GB 级显存。
+    projector_hidden_dim: 512  # 可选：正整数；投影头隐藏维度。
+    projector_out_dim: 128  # 可选：正整数；投影表示维度。
+    n_prototypes: 256  # 可选：正整数；prototype 数量，常用 128、256、512。
+    temperature: 0.1  # 可选：正数；softmax 温度。
+    sinkhorn_epsilon: 0.05  # 可选：正数；Sinkhorn 正则强度。
+    sinkhorn_iterations: 3  # 可选：正整数；Sinkhorn 迭代次数。
+    temporal_lambda: 0.2  # 可选：非负小数；时间一致性系数，0 表示关闭。
+    temporal_weights: {1: 0.25, 2: 0.10}  # 可选：帧偏移到权重的字典。
+    augmentation:  # SwAV 多视图 CSI 增强参数。
+      jitter_sigma: 0.001  # 可选：非负小数；0 表示关闭。
+      amplitude_scale_range: [0.95, 1.05]  # 可选：[最小值, 最大值]；正数有序范围。
+      time_mask_width: 1  # 可选：非负整数；0 表示关闭。
+      subcarrier_mask_width: 4  # 可选：非负整数；0 表示关闭。
+      max_time_shift: 1  # 可选：非负整数；0 表示关闭。
+  relpos:  # 相对时间位置预测配置。
+    hidden_dim: 256  # 可选：正整数；相对位置分类器隐藏维度。
+    temporal_consistency: false  # 可选：true、false；是否加入额外时间一致性损失。
+    temporal_coefficient: 0.2  # 可选：非负小数；temporal_consistency=true 时的损失系数。
+  mfm:  # Masked Feature Modeling 配置。
+    objective: feature  # 可选：feature、raw、hybrid；feature 重建特征，raw 重建 CSI，hybrid 同时使用两者。
+    mask_ratio: 0.4  # 可选：0 到 1 之间的小数；输入 CSI 被遮挡的比例。
+    mask_modes: [joint, time, subcarrier]  # 可选：joint、time、subcarrier 的非空列表；可组合。
+    ema_momentum: 0.996  # 可选：0 到 1 之间的小数；teacher encoder EMA 动量。
+    ema_schedule: constant  # 可选：constant、cosine；EMA 动量调度方式。
+    predictor_hidden_dim: 256  # 可选：正整数；特征预测器隐藏维度。
+    masked_region_weight: 2.0  # 可选：大于等于 1 的小数；遮挡区域重建损失权重。
+    raw_decoder_hidden_dim: 64  # 可选：正整数；objective 为 raw/hybrid 时 CSI 解码器隐藏维度。
+  mae:  # 原版 MAE（Masked Autoencoder，He et al. 2022）在官方 MetaFi-R34 上的适配。
+    # 与 mfm 的区别：mae 无 EMA teacher、重建原始 CSI、只在被遮挡 patch 上算 per-patch 归一化 MSE。
+    mask_ratio: 0.75  # 可选：(0,1) 之间的小数（不能取 0 或 1）；被遮挡 patch 的比例，原论文推荐 0.75。
+    patch_height: 6  # 可选：正整数且整除 114；patch 的子载波跨度，默认 6 → 19 行。
+    patch_width: 5  # 可选：正整数且整除 10；patch 的时间跨度，默认 5 → 2 列（共 19×2=38 个 patch）。
+    decoder_hidden_dim: 256  # 可选：正整数；轻量解码器隐藏维度，仅预训练使用，不导出到微调。
+    patch_norm: true  # 可选：true、false；是否对重建目标做 per-patch 归一化（原版 MAE 做法）。
+    use_mask_token: true  # 可选：true、false；是否用可学习的 mask token 填充被遮挡 patch。

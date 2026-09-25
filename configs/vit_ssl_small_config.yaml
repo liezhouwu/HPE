@@ -1,0 +1,79 @@
+# ViT-csi-small 原版 MAE 的小样本配置（20% 无标注 sequence 预训练 + 1/2/4/8shot 微调）。
+# 该配置只被 scripts/vit_ssl/* 使用，与 configs/vit_ssl_config.yaml（全量）并列，
+# 不参与 MetaFi-R34 的 ssl/small 工作流。
+
+# 数据集根目录；可填相对 try3 的路径或绝对路径。
+dataset_root: ../my_dataset
+# 基线配置；提供官方 S1/S2/S3 划分定义与引擎默认参数（微调阶段合并使用）。
+baseline_config: configs/baseline_config.yaml
+# 运行设备。
+device: cuda
+# 默认协议。
+protocol: protocol3
+# single 命令默认划分；可被 --split 覆盖。
+single_split: random_split
+all_splits: [random_split, cross_subject_split, cross_scene_split]
+# 无标签数据使用范围；小样本入口只支持 strict（子集必须在训练边界内）。
+scope: strict
+# 随机种子；需与审计清单的 seed 一致（子集按审计清单的 seed 分层抽样）。
+seed: 42
+# 下游可用标注预算；小样本默认 1shot，可被 --label-budget 覆盖为 2shot/4shot/8shot。
+label_budget: 4shot
+
+# ===== ViT-MAE 模型结构（与全量配置一致）=====
+vit_mae:
+  mask_ratio: 0.75  # 可选：(0,1) 之间的小数；被遮挡 patch 比例，原论文为 0.75。
+  decoder_dim: 512  # 可选：正整数；轻量解码器维度（仅预训练使用，不导出）。
+  decoder_depth: 8  # 可选：正整数；解码器 Transformer 层数。
+  decoder_heads: 16  # 可选：正整数；解码器注意力头数。
+  patch_h: 3  # 可选：正整数且整除 114；patch 的子载波跨度（19 行）。改它=改编码器 token 网格（见下注）。
+  patch_w: 2  # 可选：正整数且整除 10；patch 的时间跨度（2 列，共 38 个 patch）。
+  # 注意：patch_h/patch_w 决定编码器的 patch 投影与位置嵌入，改动后 token 网格随之变化
+  # （3x2 → 190 token，6x5 → 38 token）。因此：① 预训练与微调必须用同一取值（微调读同一份配置，
+  # 不匹配会在加载 encoder 时明确报错）；② 旧取值的预训练 checkpoint 不再可用，需要重新预训练。
+
+# ===== 小样本预训练（20% 无标注 sequence）=====
+pretrain:  # 学习率/优化器沿用 ViT 口径，只缩短 epoch 并按小样本调度衰减。
+  epochs: 10  # 可选：正整数；小样本预训练 epoch 数（与 small_sample.pretrain_epochs 一致）。
+  max_batches: null  # 可选：null 或正整数；冒烟测试可设 3。
+  log_every_batches: 50  # 可选：正整数。
+  micro_batch: 32  # 可选：正整数；单次前向 batch，显存不足时减小。
+  gradient_accumulation: 2  # 可选：正整数；有效 batch = micro_batch × 此值 = 256。
+  num_workers: 0  # 可选：0 或正整数；Windows 建议先用 0。
+  amp: true  # 可选：true、false；CUDA 上更快且省显存。
+  optimizer: adamw  # 可选：adamw、sgd。
+  sgd_momentum: 0.9  # 可选：0 到 1；仅 optimizer=sgd 时生效。
+  pretrain_lr: 0.00024  # 可选：正数；ViT 口径 2.4e-4。
+  weight_decay: 0.01  # 可选：非负小数；ViT 预训练口径 0.01。
+  scheduler: multistep  # 可选：cosine、multistep、constant；小样本用阶梯衰减。
+  scheduler_t_max: 10  # 可选：正整数；仅 scheduler=cosine 时使用，通常等于 epochs。
+  lr_milestones: [6, 8]  # 可选：递增整数列表；仅 scheduler=multistep 时使用。
+  lr_gamma: 0.1  # 可选：0 到 1；仅 scheduler=multistep 时使用。
+  lr_min: 0.00001  # 可选：非负小数；调度器的最小学习率下界。
+
+# ===== 下游微调（1/2/4/8shot，与全量配置一致）=====
+finetune:
+  epochs: 25  # 可选：正整数；下游监督训练 epoch 数。
+  num_workers: 0  # 可选：0 或正整数。
+  val_every: 5  # 可选：正整数；每隔多少 epoch 验证一次。
+  amp: true  # 可选：true、false。
+  optimizer: adamw  # 可选：adamw、sgd。
+  learning_rate: 0.0003  # 可选：正数；与全量 ViT 微调口径一致。
+  weight_decay: 0.0  # 可选：非负小数；微调通常为 0。
+  sgd_momentum: 0.9  # 可选：0 到 1；仅 optimizer=sgd 时生效。
+  scheduler: cosine  # 可选：cosine、multistep、constant。
+  lr_warmup_epochs: 0  # 可选：非负整数。
+  lr_min: 0.000001  # 可选：非负小数；仅 scheduler=cosine 时使用。
+  lr_milestones: [20, 40, 60, 80]  # 可选：递增整数列表；仅 scheduler=multistep 时使用。
+  lr_gamma: 0.5  # 可选：0 到 1；仅 scheduler=multistep 时使用。
+  dropout_p: 0.0  # 可选：0.0 到 1.0；姿态头 dropout（官方口径为 0）。
+  selection_metric: mpjpe  # 可选：mpjpe、pampjpe；选择最优 checkpoint 的指标。
+  early_stopping_patience: 100  # 可选：正整数；100 等价于允许跑满。
+  use_epoch_patience: false  # 可选：true、false；false=按验证次数计。
+  loss_name: mse  # 可选：mse、mse_bone；与 MetaFi 侧对齐使用 mse。
+
+# ===== 小样本计划（scripts/vit_ssl/run.py 读取）=====
+small_sample:
+  pretrain_sequence_fraction: 0.2  # 可选：(0,1] 之间的小数；无标注 sequence 抽样比例。
+  pretrain_epochs: 10  # 可选：正整数；需与 pretrain.epochs 一致。
+  finetune_epochs: 25  # 可选：正整数；需与 finetune.epochs 一致。

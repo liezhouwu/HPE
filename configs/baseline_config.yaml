@@ -1,0 +1,143 @@
+# 官方 MetaFi++ 复现实验唯一配置文件。
+# 单个默认划分：python scripts/run.py baseline single
+# 全部划分：python scripts/run.py baseline all
+
+# 数据集根目录；可填相对 try3 的路径或绝对路径，例如 ../my_dataset 或 D:/data/MMFi。
+dataset_root: ../my_dataset  # 可选：任意有效 MMFi 数据集根目录。
+# 训练设备；可选 cuda、cuda:0、cpu。GPU 训练通常使用 cuda。
+device: cuda  # 可选：cuda、cuda:0、cpu。
+# 默认协议；protocol1=14 个日常动作，protocol2=13 个康复动作，protocol3=全部 27 个动作。
+protocol: protocol2  # 可选：protocol1、protocol2、protocol3。
+# single 命令默认运行的划分；可被命令行 --split 覆盖。
+single_split: random_split  # 可选：random_split、cross_subject_split、cross_scene_split。
+# all 命令依次运行的划分列表；可删减为任意非空子集。
+all_splits: [random_split, cross_subject_split, cross_scene_split]  # 可选项同 single_split。
+# 运行器参数；这些值只影响命令执行方式，不改变数据划分定义。
+runtime:  # 可修改：AMP、DataLoader worker 数和验证间隔。
+  amp: false  # 可选：true、false；false 更接近 benchmark 的普通 FP32 训练。
+  num_workers: 0  # 可选：0 或正整数；Windows 建议先用 0，稳定后可尝试 2、4、8。
+  val_every: 5  # 可选：正整数；每隔多少个 epoch 做一次 validation。
+
+# ===== MMFi 官方数据协议 =====
+# 当前仅支持 WiFi-CSI 单模态。
+modality: wifi-csi  # 可选：wifi-csi；try3 的官方对齐流程不支持其他模态。
+# 数据单元；官方训练按帧读取，每个序列约 297 帧。
+data_unit: frame  # 可选：frame；不要改为 sequence。
+# 底层训练引擎的默认划分；统一入口会根据 single/all 自动覆盖。
+split_to_use: random_split  # 可选：random_split、cross_subject_split、cross_scene_split。
+
+# S1：每个动作按 subject 随机分为训练和验证。
+random_split:  # 可修改：随机划分比例和随机种子。
+  ratio: 0.8  # 可选：0 到 1 之间的小数；0.8 表示 80% subject 用于训练。
+  random_seed: 0  # 可选：非负整数；改变后会得到不同的 S1 subject 抽样。
+
+# S2：官方 32 名训练 subject 与 8 名验证 subject。
+cross_subject_split:  # 建议保持官方列表，不要随意修改，否则不再是官方 S2。
+  train_dataset:  # S2 训练集合定义。
+    subjects: [S01, S02, S03, S04, S06, S07, S08, S09, S11, S12, S13, S14, S16, S17, S18, S19, S21, S22, S23, S24, S26, S27, S28, S29, S31, S32, S33, S34, S36, S37, S38, S39]  # 可选：S01 到 S40；官方训练集为此 32 人。
+    actions: all  # 可选：all 或动作列表，例如 [A01, A02]。
+  val_dataset:  # S2 验证集合定义。
+    subjects: [S05, S10, S15, S20, S25, S30, S35, S40]  # 可选：S01 到 S40；官方验证集为此 8 人。
+    actions: all  # 可选：all 或动作列表。
+
+# S3：官方跨场景定义；E01-E03 训练，E04 验证。
+cross_scene_split:  # 建议保持官方场景列表。
+  train_dataset:  # S3 训练集合定义。
+    scenes: [E01, E02, E03]  # 可选：E01、E02、E03、E04；官方训练为前三个场景。
+    subjects: null  # 可选：null 或 subject 列表；官方 S3 由场景规则决定，保持 null。
+    actions: all  # 可选：all 或动作列表。
+  val_dataset:  # S3 验证集合定义。
+    scenes: [E04]  # 可选：E01、E02、E03、E04；官方验证为 E04。
+    subjects: null  # 可选：null 或 subject 列表；官方 S3 保持 null。
+    actions: all  # 可选：all 或动作列表。
+# test.py 使用的 held-out subject；与官方 S2 验证 subject 对齐。
+test_subjects: [S05, S10, S15, S20, S25, S30, S35, S40]  # 可选：S01 到 S40；官方 S2 保持此列表。
+
+# ===== 官方训练骨架 =====
+# 初始化随机种子；统一入口 baseline all 会让每个划分以同一初始种子开始。
+init_rand_seed: 0  # 可选：非负整数。
+# 训练目标坐标系；absolute 用于官方无对齐 MPJPE，root_relative 仅用于诊断。
+target_space: absolute  # 可选：absolute、root_relative；官方复现请保持 absolute。
+# 是否启用官方 train/validation 两集合流程；关闭后会使用研究型 sequence select 划分。
+official_alignment: true  # 可选：true、false；官方复现请保持 true。
+# 是否加载 torchvision ImageNet ResNet-34 权重；首次 true 可能需要本地缓存或网络下载。
+pretrained_backbone: false  # 可选：true、false；离线复现实验建议 false。
+# 训练 epoch 数。
+num_epochs: 100  # 可选：正整数；benchmark 使用 100。
+# 优化器。
+optimizer: sgd  # 可选：sgd、adamw；官方复现请保持 sgd。
+scheduler: multistep  # Options: cosine, multistep, constant; official reproduction uses multistep.
+# 初始学习率。
+learning_rate: 0.05  # 可选：正数；官方 SGD 默认 0.05。
+# L2 权重衰减。
+weight_decay: 0.0  # 可选：非负小数；官方设置为 0.0。
+# SGD 动量；仅 optimizer=sgd 时生效。
+sgd_momentum: 0.9  # 可选：0 到 1 之间的小数；官方设置为 0.9。
+# MultiStepLR 的衰减 epoch；仅 optimizer=sgd 时生效。
+lr_milestones: [20, 40, 60, 80]  # 可选：递增正整数列表；官方设置为 [20, 40, 60, 80]。
+# 每次到达 milestone 后的学习率乘数。
+lr_gamma: 0.5  # 可选：0 到 1 之间的小数；官方设置为 0.5。
+# warmup epoch；SGD 官方流程不使用 warmup。
+lr_warmup_epochs: 0  # 可选：非负整数；官方设置为 0。
+# Cosine 调度器的最小学习率；optimizer=sgd 时不使用。
+lr_min: 0.0  # 可选：非负小数；SGD 官方流程保持 0.0。
+# 最优 checkpoint 的选择指标。
+selection_metric: mpjpe  # 可选：mpjpe、pampjpe；官方主结果使用 mpjpe。
+# 连续多少次验证没有提升后停止训练。
+early_stopping_patience: 100  # 可选：正整数；100 等价于允许完整跑完官方 100 epoch。
+# patience 的计数方式；false=按验证次数，true=按 epoch 距离。
+use_epoch_patience: false  # 可选：true、false；官方流程建议 false。
+# 解码器 Dropout 概率。
+dropout_p: 0.0  # 可选：0.0 到 1.0；官方骨架保持 0.0。
+# 是否对 CSI 做额外增强。
+augment: false  # 可选：true、false；官方复现保持 false。
+# 是否使用 torch.compile。
+use_compile: false  # 可选：true、false；官方复现保持 false，便于结果对齐。
+# 是否让卷积权重使用 channels_last 内存布局。
+use_channels_last: false  # 可选：true、false；默认 false。
+# AMP 使用的低精度类型；仅 runtime.amp=true 时生效。
+amp_dtype: fp16  # 可选：fp16、bf16；GPU 通常使用 fp16。
+# 研究型序列 select 划分比例；official_alignment=true 时不参与官方 train/validation 流程。
+val_fraction: 0.1  # 可选：0 到 1 之间的小数；官方模式下保持默认即可。
+# 训练 DataLoader 参数。
+train_loader:  # 可修改：训练 batch 大小。
+  batch_size: 32  # 可选：正整数；benchmark 使用 32，显存不足可改为 16、8。
+# 验证 DataLoader 参数。
+validation_loader:  # 可修改：验证 batch 大小。
+  batch_size: 1  # 可选：正整数；benchmark 验证逐帧使用 1。
+
+
+
+#  ### 基线复现
+#
+#  # 单个默认划分：当前默认 P3-S2
+#  python scripts/run.py baseline single
+#
+#  # 单个指定划分
+#  python scripts/run.py baseline single --split cross_scene_split
+#
+#  # 默认 Protocol 3 的 S1、S2、S3 全部训练
+#  python scripts/run.py baseline all
+#
+#  # 改为 Protocol 1 的三个划分
+#  python scripts/run.py baseline all --protocol protocol1
+#
+#  ### SSL 与监督对照
+#
+#  # 单个默认划分的 4shot 随机初始化监督对照
+#  python scripts/run.py ssl supervised single
+#
+#  # 单个默认划分：SimCLR 审计 → 预训练 → 微调
+#  python scripts/run.py ssl simclr single
+#
+#  # SimCLR 一行运行 S1、S2、S3
+#  python scripts/run.py ssl simclr all
+#
+#  # MoCo 在单个指定划分运行
+#  python scripts/run.py ssl moco single --split cross_scene_split
+#
+#  # 其他可用方法
+#  python scripts/run.py ssl swav single
+#  python scripts/run.py ssl relpos single
+#  python scripts/run.py ssl mfm single
+#  python scripts/run.py ssl mae single

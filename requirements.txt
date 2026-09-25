@@ -1,0 +1,8 @@
+# PyTorch and torchvision must be mutually compatible; use a CUDA build for GPU training.
+torch
+torchvision
+numpy
+scipy
+PyYAML
+opencv-python
+matplotlib
