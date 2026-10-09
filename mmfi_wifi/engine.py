@@ -41,7 +41,7 @@ import torch.nn as nn
 import yaml
 
 from .experiment_config import write_experiment_config
-from .data import make_dataset, make_dataloader, make_manual_test_dataset
+from .data import make_dataset, make_dataloader, make_manual_test_dataset, ShuffledTargetDataset
 from .label_manifest_contract import load_bound_label_manifest, write_bound_label_manifest
 from .metrics import pelvis_of
 from .pose_metrics import EvaluationOutput, evaluate_pose_triplet
@@ -768,12 +768,36 @@ def build_training_optimizer(
     return optimizer, scheduler
 
 
-def _strategy_static_groups(model, strategy):
-    """Build one stable all-parameter optimizer partition for a strategy."""
+def _freeze_encoder_groups(model, groups):
+    """?? encoder??? optimizer ????? encoder ???"""
+    from pose_ssl.metafi.fine_tune_strategy import set_batchnorm_mode
+
+    model = unwrap_model(model)
+    for parameter in model.encoder.parameters():
+        parameter.requires_grad_(False)
+    model.encoder.eval()
+    set_batchnorm_mode(model.encoder, frozen=True)
+
+    filtered = []
+    for group in groups:
+        parameters = [parameter for parameter in group["params"] if parameter.requires_grad]
+        if parameters:
+            item = dict(group)
+            item["params"] = parameters
+            filtered.append(item)
+    if not filtered:
+        raise ValueError("freeze_encoder ????????")
+    return filtered
+
+
+def _strategy_static_groups(model, strategy, *, freeze_encoder=False):
+    """Build the optimizer partition used by the training strategy."""
     model.train()
     # Transfer's final phase exposes every encoder partition.  Matched and
     # Sup-DifferentialLR are also complete at epoch eight.
     groups = strategy.apply(unwrap_model(model), epoch=8)
+    if freeze_encoder:
+        groups = _freeze_encoder_groups(model, groups)
     return [dict(group) for group in groups]
 
 
@@ -797,10 +821,12 @@ def _restore_strategy_state(state, strategy, *, next_epoch):
         raise ValueError("last_state strategy_state is incompatible with this run")
 
 
-def _apply_new_pipeline_strategy(model, strategy, scheduler, epoch):
-    """Apply strategy after ``model.train`` so frozen BN remains in eval mode."""
+def _apply_new_pipeline_strategy(model, strategy, scheduler, epoch, *, freeze_encoder=False):
+    """Apply strategy and then restore the optional frozen-encoder contract."""
     model.train()
     active_groups = strategy.apply(unwrap_model(model), epoch=epoch)
+    if freeze_encoder:
+        active_groups = _freeze_encoder_groups(model, active_groups)
     scheduler.apply(epoch, active_groups)
     return active_groups
 
@@ -1264,6 +1290,10 @@ def train_one_experiment(dataset_root, config, result_dir, device,
         test_ds = configured_val_ds
         train_ds, select_ds, split_meta = split_train_select_by_sequence(
             train_ds_full, val_fraction=val_fraction, seed=split_seed)
+    if bool(config.get("train_shuffle_targets", False)):
+        train_ds = ShuffledTargetDataset(
+            train_ds, seed=int(config.get("train_shuffle_seed", split_seed))
+        )
     n_train = len(train_ds)
     n_select = len(select_ds)
 
@@ -1288,8 +1318,12 @@ def train_one_experiment(dataset_root, config, result_dir, device,
     prefetch_factor = config.get('prefetch_factor', 4)
     train_rng = torch.Generator().manual_seed(split_seed)
     eval_rng = torch.Generator().manual_seed(split_seed + 1)
-    train_loader = make_dataloader(train_ds, True, train_rng, bs, num_workers,
-                                   prefetch_factor=prefetch_factor)
+    train_loader = make_dataloader(
+        train_ds, True, train_rng, bs, num_workers,
+        prefetch_factor=prefetch_factor,
+        sequence_balanced=bool(config.get("train_sequence_balanced", False)),
+        frames_per_sequence=int(config.get("train_frames_per_sequence", 16)),
+    )
     select_loader = make_dataloader(select_ds, False, eval_rng, vbs, min(num_workers, 2),
                                     prefetch_factor=prefetch_factor)
     test_loader = make_dataloader(test_ds, False, eval_rng, vbs, min(num_workers, 2),
@@ -1374,7 +1408,10 @@ def train_one_experiment(dataset_root, config, result_dir, device,
     optimizer_name = str(config.get('optimizer', 'adamw')).lower()
     if new_pipeline:
         # SSL 微调沿用已有分组策略；其 encoder 已换为官方 MetaFi++ 骨架。
-        static_groups = _strategy_static_groups(model, fine_tune_strategy)
+        static_groups = _strategy_static_groups(
+            model, fine_tune_strategy,
+            freeze_encoder=bool(config.get("freeze_encoder", False)),
+        )
         optimizer, strategy_scheduler = build_training_optimizer(
             static_groups,
             config,
@@ -1623,7 +1660,8 @@ def train_one_experiment(dataset_root, config, result_dir, device,
 
         if new_pipeline:
             active_groups = _apply_new_pipeline_strategy(
-                model, fine_tune_strategy, strategy_scheduler, epoch
+                model, fine_tune_strategy, strategy_scheduler, epoch,
+                freeze_encoder=bool(config.get("freeze_encoder", False)),
             )
         else:
             if epoch < warmup:
@@ -1631,6 +1669,8 @@ def train_one_experiment(dataset_root, config, result_dir, device,
                 for pg in optimizer.param_groups:
                     pg['lr'] = warmup_lr
             model.train()
+            if config.get("freeze_encoder", False) and hasattr(model, "encoder"):
+                model.encoder.eval()
         lr_used = max(float(pg['lr']) for pg in optimizer.param_groups)
 
         # ---- Train ----

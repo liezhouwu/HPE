@@ -198,6 +198,7 @@ def build_matched_model(
     axis_stats: AxisStats,
     encoder_checkpoint: Path | None,
     seed: int,
+    target_space: str = "absolute",
 ) -> MetaFiPoseModel:
     """Build a seeded full model, then optionally overwrite only its encoder."""
 
@@ -462,11 +463,14 @@ def run_matched(
         requested_loss_name=getattr(args, "loss_name", None),
         requested_bone_set=getattr(args, "bone_set", None),
     )
+    target_space = config.get("target_space", "absolute")
+    if target_space not in {"absolute", "root_relative"}:
+        raise ValueError("config target_space ??? absolute ? root_relative")
     config.update({
         "protocol": args.protocol,
         "split_to_use": args.split,
         "init_rand_seed": args.seed,
-        "target_space": "absolute",
+        "target_space": target_space,
         "selection_metric": "mpjpe",
     })
     if args.epochs is not None:
@@ -508,7 +512,7 @@ def run_matched(
             raise ValueError("encoder checkpoint 必须是 Mapping")
         # A throwaway model is used solely to validate strict loading before any
         # result directory exists; the actual factory reconstructs from seed.
-        probe = build_matched_model(axis_stats, None, args.seed)
+        probe = build_matched_model(axis_stats, None, args.seed, target_space=target_space)
         actual_pretrain_identity = load_pretrained_encoder(probe, raw_checkpoint, expected_boundary)
         config["pretrain_config_fingerprint"] = actual_pretrain_identity.config_fingerprint
         config["pretrain_identity_fingerprint"] = _full_sha256(actual_pretrain_identity.to_dict())
@@ -538,14 +542,23 @@ def run_matched(
     )
     prepare_run_directory(result_dir, identity, resume=resume)
 
+    target_space_config = target_space
+
     def factory(*, dropout_p: float, target_space: str) -> MetaFiPoseModel:
-        if target_space != "absolute":
-            raise ValueError("matched MetaFi 实验必须使用 absolute target_space")
-        model = build_matched_model(axis_stats, None, args.seed)
+        if target_space != target_space_config:
+            raise ValueError("?? target_space ??????")
+        model = build_matched_model(
+            axis_stats, None, args.seed, target_space=target_space_config
+        )
         if raw_checkpoint is not None:
             load_pretrained_encoder(model, raw_checkpoint, expected_boundary)
+        if config.get("freeze_encoder", False):
+            model.encoder.eval()
+            for parameter in model.encoder.parameters():
+                parameter.requires_grad_(False)
         model.decoder.dropout_p = dropout_p
         return model
+
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     setup_cuda(device)
@@ -567,7 +580,10 @@ def run_matched(
         resume=resume,
         experiment_context={
             "source_config": getattr(args, "experiment_source", None),
-            "arguments": vars(args),
+            "arguments": {
+                key: (str(value) if isinstance(value, Path) else value)
+                for key, value in vars(args).items()
+            },
             "pretrain_checkpoint": str(encoder_checkpoint.resolve()) if encoder_checkpoint is not None else None,
             "pretrain_checkpoint_sha256": file_sha256(encoder_checkpoint) if encoder_checkpoint is not None else None,
             "pretrain_identity": actual_pretrain_identity.to_dict() if actual_pretrain_identity else None,

@@ -1,77 +1,141 @@
-# HPE：WiFi-CSI 三维人体姿态估计
+# HPE: MM-Fi WiFi-CSI 3D Human Pose Estimation
 
-本项目使用 MM-Fi 的 WiFi-CSI 数据进行三维人体姿态估计，包含监督基线、MetaFi/ResNet-34 自监督预训练与微调，以及独立的 ViT-MAE 预训练与微调。支持 Protocol 1/2/3 与 Random、Cross-subject、Cross-scene 三种划分。
+This repository contains the core source code and configuration for MM-Fi WiFi-CSI 3D human pose estimation, including supervised baselines, existing SSL pipelines, ViT-MAE, and the WiFi-JEPA adaptation.
 
-> 本仓库只提供源码和配置；不提供原始数据、预训练权重、实验结果或训练日志。首次运行需要自行准备 MM-Fi 数据集。
+The repository does **not** include the MM-Fi dataset, model checkpoints, generated results, or training logs.
 
-## 核心目录与入口
+## Main entry points
 
-| 路径 | 作用 |
-| --- | --- |
-| `mmfi_wifi/` | MM-Fi 数据加载、训练引擎、模型、姿态评价指标、数据边界与标签清单校验、运行身份。 |
-| `pose_ssl/metafi/` | SimCLR、MoCo、SwAV、RelPos、MFM、MAE 的 MetaFi 自监督方法、抽样和 checkpoint 管理。 |
-| `pose_ssl/vit_ssl/`、`pose_ssl/model.py` | ViT-CSI-small 编码器及 ViT-MAE 模型。 |
-| `scripts/run.py`、`scripts/metafi_ssl/` | 监督基线、MetaFi 全量/小样本 SSL 的审计、预训练、监督训练和微调入口。 |
-| `scripts/reproduction/` | 监督基线训练、跨划分运行和测试入口。 |
-| `scripts/vit_ssl/` | ViT-MAE 审计清单复用、预训练与微调；`run.py` 是一条命令运行三种划分的入口。 |
-| `scripts/report_results.py` | 扫描已完成实验并生成本地结果汇总；结果文件不纳入本仓库。 |
-| `configs/` | 官方监督基线、MetaFi 全量/小样本、ViT 全量/小样本的 YAML 配置。 |
+Run commands from the repository root.
 
-本仓库未附测试代码和额外说明文档。
+### Existing pipelines
 
-## 环境和数据
+Existing supervised/SSL entry points are under `scripts/`. Their usage and configuration options are documented in the corresponding YAML files and scripts.
 
-- Python 3.10+；需要 PyTorch 和 torchvision 版本互相匹配。使用 CUDA 时请安装与本机驱动兼容的 PyTorch 构建；本地开发环境使用 Python 3.12。
-- 在仓库根目录执行 `python -m pip install -r requirements.txt`。如需 CUDA，请先正确安装对应的 PyTorch/torchvision，再安装其余依赖。
-- 下载并自行放置 MM-Fi 数据集，保留原有场景、受试者与动作层级。本仓库不含数据。
-- 五份 `configs/*.yaml` 的 `dataset_root` 默认都是 `../my_dataset`，表示数据集位于此仓库的同级目录；如放在其他位置，请先修改配置。运行 ViT 入口时传入的数据集位置也应与配置一致。
-- 下方命令在仓库根目录执行。`4shot` 指每个动作使用四条完整标注序列；其他可用预算以运行入口和配置为准。
+### WiFi-JEPA
 
-## 运行示例
+```powershell
+python WIFIJEPA/scripts/pretrain.py --config WIFIJEPA/configs/matched_small.yaml
+python WIFIJEPA/scripts/finetune.py --config WIFIJEPA/configs/matched_small.yaml
+```
 
-### 官方监督基线
+Set `experiment.mode` to `supervised` for the structured supervised control or to `jepa` for fine-tuning from the automatically selected WiFi-JEPA encoder checkpoint.
 
-~~~powershell
-python scripts/run.py baseline all --protocol protocol3
-~~~
+The default WiFi-JEPA configuration uses:
 
-### MetaFi 少样本：监督对照和 SSL
+```text
+protocol1 / strict / random_split / seed42 / 2shot
+```
 
-~~~powershell
-python scripts/run.py small baseline all --protocol protocol3 --label-budget 4shot
-python scripts/run.py small swav all --protocol protocol3 --label-budget 4shot
-~~~
+Change only the protocol, split, label budget, seed, or mode when switching experiments. Audit files and output directories are resolved automatically.
 
-`swav` 可换成 `simclr`、`moco`、`relpos`、`mfm` 或 `mae`。`all` 依次运行三种划分；只运行一个划分可用 `single --split cross_scene_split`。全量预训练入口示例：`python scripts/run.py ssl simclr all --protocol protocol3 --label-budget 4shot`。`scripts/run.py` 会按需创建数据审计，并在已完成实验后调用结果汇总脚本。
+## WiFi-JEPA core implementation
 
-### ViT-MAE 小样本：仅 MAE-ViT，三种划分
+```text
+WIFIJEPA/
+?? src/
+?  ?? model.py       # Structured tokenizer, ViT, predictor, JEPA model, pose model
+?  ?? masking.py     # Whole-link masking over the time-link grid
+?  ?? data.py        # MM-Fi CSI loading and normalization ablation hook
+?  ?? paths.py       # Automatic audit/checkpoint/result path resolution
+?? scripts/
+?  ?? pretrain.py    # WiFi-JEPA latent pre-training
+?  ?? finetune.py    # Structured supervised or JEPA fine-tuning
+?? configs/
+?  ?? matched_small.yaml
+?? tests/
+   ?? test_core.py
+```
 
-ViT 入口**复用 MetaFi 的审计清单**，而不会在空目录自动生成审计。新克隆仓库若尚无对应清单，先对每个划分单独审计（PowerShell 示例）：
+The MM-Fi adaptation uses amplitude-only input with shape `(3, 114, 10)`, reorganized as `(C,T,L)=(114,10,3)`. It creates 30 time-link tokens and masks complete receiver links across all 10 time samples.
 
-~~~powershell
-foreach ($split in @("random_split", "cross_subject_split", "cross_scene_split")) {
-    $audit = "result_metafi_ssl/runs/protocol3/strict/$split/seed42/audit/b4s"
-    python scripts/metafi_ssl/audit_data.py ../my_dataset configs/baseline_config.yaml `
-        --protocol protocol3 --split $split --scope strict --seed 42 `
-        --label-budget 4shot --output-dir $audit
-    if ($LASTEXITCODE -ne 0) { throw "审计失败：$split" }
-}
-~~~
+## Project structure
 
-审计目录已存在且产物完整时，不要重新运行审计命令覆盖原目录。然后执行：
+```text
+HPE/
+?? configs/          # Existing baseline and SSL configurations
+?? dataset/          # Empty placeholder; put MM-Fi data here locally
+?? mmfi_wifi/        # Data loading, training engine, metrics, manifests
+?? pose_ssl/         # Existing SSL models and pre-training utilities
+?? result/           # Empty placeholder for local generic results
+?? scripts/          # Existing training, audit, and reporting entry points
+?? WIFIJEPA/         # WiFi-JEPA core implementation and configuration
+?? .gitignore
+?? README.md
+?? requirements.txt
+```
 
-~~~powershell
-python scripts/vit_ssl/run.py ../my_dataset configs/vit_ssl_small_config.yaml all `
-    --protocol protocol3 --label-budget 4shot --skip-sup --device cuda
-~~~
+Generated WiFi-JEPA artifacts are intentionally ignored by Git and remain local under:
 
-`--skip-sup` 跳过 Sup-ViT 微调；当前命令仍会在每个划分进行 ViT-MAE 预训练和 MAE-ViT 微调。未指定 `--skip-sup` 时会同时运行 Sup-ViT。换用 P1/P2 时，同时修改审计命令和运行命令的 `--protocol`。
+```text
+WIFIJEPA/audit/
+WIFIJEPA/results/pretrain/
+WIFIJEPA/result_metafi_ssl/
+```
 
-## 输出及结果汇总
+## Dataset structure
 
-- 基线实验：`result/`。
-- MetaFi SSL 与审计：`result_metafi_ssl/runs/`。
-- ViT-MAE：`result_metafi_ssl/vit/`。
-- 汇总报告：`reports/RESULTS_SUMMARY.{md,csv,json}`；需要手动刷新时运行 `python scripts/report_results.py`。
+Set `experiment.dataset_root` in `WIFIJEPA/configs/matched_small.yaml` to the local MM-Fi dataset directory. The exported default is `dataset`.
 
+```text
+dataset/
+?? E01/
+?  ?? S01/
+?     ?? A01/
+?        ?? ground_truth.npy
+?        ?? wifi-csi/
+?           ?? frame001.mat
+?           ?? frame002.mat
+?           ?? frame297.mat
+?? E02/
+?? E03/
+?? E04/
+```
 
+Each sequence is identified by `scene / subject / action`. CSI frames contain amplitude data with shape `(3, 114, 10)`. The ground-truth file contains 17 three-dimensional joints over 297 frames with shape `(297, 17, 3)`. An optional `wifi-csi-packed.npy` may be placed inside each `wifi-csi/` directory for packed frame loading.
+
+## Result structure
+
+The tracked `result/` directory is intentionally empty. Runtime outputs are ignored and remain local.
+
+```text
+result/
+?? .gitkeep
+```
+
+WiFi-JEPA pre-training results:
+
+```text
+WIFIJEPA/results/pretrain/<protocol>/<split>/seed<seed>/<configuration-id>/
+?? encoder.pth
+?? pretrain_manifest.json
+?? pretrain_metrics.yaml
+```
+
+WiFi-JEPA fine-tuning results:
+
+```text
+WIFIJEPA/result_metafi_ssl/<method>/<protocol>/<split>/seed<seed>/<label-budget>/<configuration-id>/
+?? best_absolute.pth
+?? best_pelvis.pth
+?? best_pa.pth
+?? metrics.csv
+?? final_report.json
+?? summary_absolute.json
+?? summary_pelvis.json
+?? summary_pa.json
+?? test_outputs_absolute.npz
+?? done.txt
+```
+
+The absolute checkpoint and `test_mpjpe_mm` are the primary outputs for actual joint position error. Pelvis-aligned MPJPE and PA-MPJPE are diagnostic metrics.
+
+## Installation
+
+Use Python 3.10 or newer. Install a PyTorch/torchvision pair compatible with the local CUDA driver, then install the remaining dependencies:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+The repository only contains code and configuration. Prepare the dataset locally before running training.

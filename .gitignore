@@ -28,3 +28,17 @@
 !/scripts/vit_ssl/*.py
 !/scripts/reproduction/
 !/scripts/reproduction/*.py
+!/WIFIJEPA/
+!/WIFIJEPA/__init__.py
+!/WIFIJEPA/src/
+!/WIFIJEPA/src/*.py
+!/WIFIJEPA/scripts/
+!/WIFIJEPA/scripts/*.py
+!/WIFIJEPA/configs/
+!/WIFIJEPA/configs/*.yaml
+!/WIFIJEPA/tests/
+!/WIFIJEPA/tests/*.py
+!/dataset/
+!/dataset/.gitkeep
+!/result/
+!/result/.gitkeep

@@ -23,7 +23,7 @@ RUN_IDENTITY_FILENAME = "run_identity.json"
 LAST_STATE_FILENAME = "last_state.pth"
 RUN_IDENTITY_SCHEMA_VERSION = 1
 NEW_PIPELINE_LAST_STATE_SCHEMA_VERSION = 3
-_RESULT_ROOT_NAME = "result_metafi_ssl"
+_RESULT_ROOT_NAMES = frozenset({"result_metafi_ssl", "new_result"})
 _LEGACY_RESULT_ROOT_NAME = "result"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_IDENTITY_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -198,7 +198,7 @@ def _is_link_or_junction(path: Path) -> bool:
 
 
 def _result_root_candidate(path: Path) -> Path:
-    """Return the single lexical ``result_metafi_ssl`` ancestor of ``path``."""
+    """Return the single lexical experiment-result ancestor of ``path``."""
     if any(part == ".." for part in path.parts):
         raise ValueError(
             "新 MetaFi SSL 结果必须写入 result_metafi_ssl 子树，"
@@ -209,7 +209,7 @@ def _result_root_candidate(path: Path) -> Path:
     matches = 0
     selected: Path | None = None
     while True:
-        if candidate.name.casefold() == _RESULT_ROOT_NAME:
+        if candidate.name.casefold() in _RESULT_ROOT_NAMES:
             matches += 1
             selected = candidate
         parent = candidate.parent
@@ -226,7 +226,7 @@ def _result_root_candidate(path: Path) -> Path:
 
 
 def assert_new_result_root(path: Path) -> None:
-    """Require a canonical, non-redirecting ``result_metafi_ssl`` result subtree."""
+    """Require a canonical, non-redirecting experiment result subtree."""
     if not isinstance(path, Path):
         raise TypeError("path 必须是 pathlib.Path")
 
@@ -241,7 +241,7 @@ def assert_new_result_root(path: Path) -> None:
     except OSError as error:
         raise ValueError("无法规范解析 result_metafi_ssl 结果路径") from error
 
-    if _is_link_or_junction(root_candidate) or resolved_root.name.casefold() != _RESULT_ROOT_NAME:
+    if _is_link_or_junction(root_candidate) or resolved_root.name.casefold() not in _RESULT_ROOT_NAMES:
         raise ValueError(
             "新 MetaFi SSL 结果必须写入 canonical result_metafi_ssl 子树，"
             "result_metafi_ssl 根目录不得重定向到外部位置"

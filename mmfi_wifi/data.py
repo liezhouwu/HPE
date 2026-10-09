@@ -30,6 +30,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+from .sequence_sampler import SequenceBalancedSampler
+
 _CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.cache')
 
 ALL_SUBJECTS = ['S01', 'S02', 'S03', 'S04', 'S05', 'S06', 'S07', 'S08', 'S09', 'S10',
@@ -522,6 +524,23 @@ def make_manual_test_dataset(dataset_root, config):
     return test_dataset
 
 
+
+class ShuffledTargetDataset(Dataset):
+    """Pair each input sample with a deterministically shuffled pose target."""
+
+    def __init__(self, dataset, seed: int = 42):
+        self.dataset = dataset
+        self.permutation = np.random.default_rng(seed).permutation(len(dataset))
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        sample = dict(self.dataset[index])
+        target_sample = self.dataset[int(self.permutation[index])]
+        sample["output"] = target_sample["output"].clone()
+        return sample
+
 def collate_fn_padd(batch):
     """与 mmfi_lib 原版一致。"""
     batch_data = {'modality': batch[0]['modality'],
@@ -562,11 +581,19 @@ def _preload_worker_init(worker_id):
 
 
 def make_dataloader(dataset, is_training, generator, batch_size, num_workers=8,
-                    prefetch_factor=4):
-    """带 pin_memory / prefetch / persistent_workers 的 DataLoader。"""
+                    prefetch_factor=4, sequence_balanced=False,
+                    frames_per_sequence=16):
+    """Build a frame loader, optionally sampling a fixed number per sequence."""
     kwargs = dict(batch_size=batch_size, collate_fn=collate_fn_padd,
-                  shuffle=is_training, drop_last=is_training,
-                  generator=generator, pin_memory=True, num_workers=num_workers)
+                  drop_last=is_training, generator=generator,
+                  pin_memory=True, num_workers=num_workers)
+    if is_training and sequence_balanced:
+        kwargs['sampler'] = SequenceBalancedSampler(
+            dataset, frames_per_sequence=frames_per_sequence,
+            seed=generator.initial_seed(),
+        )
+    else:
+        kwargs['shuffle'] = is_training
     if num_workers > 0:
         kwargs['prefetch_factor'] = prefetch_factor
         kwargs['persistent_workers'] = True
