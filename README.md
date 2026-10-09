@@ -1,141 +1,112 @@
-# HPE: MM-Fi WiFi-CSI 3D Human Pose Estimation
+# HPE：基于 MM-Fi WiFi-CSI 的三维人体姿态估计
 
-This repository contains the core source code and configuration for MM-Fi WiFi-CSI 3D human pose estimation, including supervised baselines, existing SSL pipelines, ViT-MAE, and the WiFi-JEPA adaptation.
+本仓库保存 MM-Fi WiFi-CSI 三维人体姿态估计项目的核心代码和配置文件，包含监督学习、自监督学习、ViT-MAE，以及针对 MM-Fi 任务适配的 WiFi-JEPA 实现。
 
-The repository does **not** include the MM-Fi dataset, model checkpoints, generated results, or training logs.
+仓库不包含原始数据集、模型权重、训练结果和训练日志。
 
-## Main entry points
+## 快速开始
 
-Run commands from the repository root.
+请在仓库根目录执行以下命令。
 
-### Existing pipelines
-
-Existing supervised/SSL entry points are under `scripts/`. Their usage and configuration options are documented in the corresponding YAML files and scripts.
-
-### WiFi-JEPA
+### WiFi-JEPA 预训练
 
 ```powershell
 python WIFIJEPA/scripts/pretrain.py --config WIFIJEPA/configs/matched_small.yaml
+```
+
+### 下游微调
+
+```powershell
 python WIFIJEPA/scripts/finetune.py --config WIFIJEPA/configs/matched_small.yaml
 ```
 
-Set `experiment.mode` to `supervised` for the structured supervised control or to `jepa` for fine-tuning from the automatically selected WiFi-JEPA encoder checkpoint.
+配置项 `experiment.mode` 支持两种模式：
 
-The default WiFi-JEPA configuration uses:
+```yaml
+experiment:
+  mode: supervised
+```
 
-```text
+表示运行结构化 ViT 的纯监督对照；改为 `mode: jepa` 表示加载 WiFi-JEPA context encoder 后进行姿态估计微调。
+
+当前默认配置为：
+
+```
 protocol1 / strict / random_split / seed42 / 2shot
 ```
 
-Change only the protocol, split, label budget, seed, or mode when switching experiments. Audit files and output directories are resolved automatically.
+切换协议、数据划分或标签量时，只需修改配置，审计文件和结果目录会自动适配。
 
-## WiFi-JEPA core implementation
+## WiFi-JEPA 核心代码
 
 ```text
 WIFIJEPA/
-?? src/
-?  ?? model.py       # Structured tokenizer, ViT, predictor, JEPA model, pose model
-?  ?? masking.py     # Whole-link masking over the time-link grid
-?  ?? data.py        # MM-Fi CSI loading and normalization ablation hook
-?  ?? paths.py       # Automatic audit/checkpoint/result path resolution
-?? scripts/
-?  ?? pretrain.py    # WiFi-JEPA latent pre-training
-?  ?? finetune.py    # Structured supervised or JEPA fine-tuning
-?? configs/
-?  ?? matched_small.yaml
-?? tests/
-   ?? test_core.py
+  src/model.py       结构化 tokenizer、ViT、预测器、JEPA 和姿态模型
+  src/masking.py     时间-链路网格上的整条链路遮挡
+  src/data.py        MM-Fi CSI 读取和归一化消融接口
+  src/paths.py       自动解析审计、checkpoint 和结果目录
+  scripts/pretrain.py  WiFi-JEPA 潜在特征预训练
+  scripts/finetune.py  结构化监督对照或 JEPA 微调
+  configs/matched_small.yaml
+  tests/test_core.py
 ```
 
-The MM-Fi adaptation uses amplitude-only input with shape `(3, 114, 10)`, reorganized as `(C,T,L)=(114,10,3)`. It creates 30 time-link tokens and masks complete receiver links across all 10 time samples.
+MM-Fi 输入为幅度 CSI，单帧形状为 `(3,114,10)`，重排为 `(C,T,L)=(114,10,3)`，并转换为 30 个时间-链路 token。
 
-## Project structure
+## 项目结构
 
 ```text
 HPE/
-?? configs/          # Existing baseline and SSL configurations
-?? dataset/          # Empty placeholder; put MM-Fi data here locally
-?? mmfi_wifi/        # Data loading, training engine, metrics, manifests
-?? pose_ssl/         # Existing SSL models and pre-training utilities
-?? result/           # Empty placeholder for local generic results
-?? scripts/          # Existing training, audit, and reporting entry points
-?? WIFIJEPA/         # WiFi-JEPA core implementation and configuration
-?? .gitignore
-?? README.md
-?? requirements.txt
+  configs/          监督学习和已有 SSL 配置
+  dataset/          空目录占位；本地运行时放置 MM-Fi 数据集
+  mmfi_wifi/        数据读取、训练引擎、指标和数据边界
+  pose_ssl/         已有自监督模型和预训练工具
+  result/           空目录占位；用于本地保存结果
+  scripts/          训练、审计和结果处理入口
+  WIFIJEPA/         WiFi-JEPA 核心代码和配置
+  README.md
+  requirements.txt
 ```
 
-Generated WiFi-JEPA artifacts are intentionally ignored by Git and remain local under:
+## 数据集结构
 
-```text
-WIFIJEPA/audit/
-WIFIJEPA/results/pretrain/
-WIFIJEPA/result_metafi_ssl/
-```
-
-## Dataset structure
-
-Set `experiment.dataset_root` in `WIFIJEPA/configs/matched_small.yaml` to the local MM-Fi dataset directory. The exported default is `dataset`.
+`WIFIJEPA/configs/matched_small.yaml` 的默认数据路径为 `dataset`：
 
 ```text
 dataset/
-?? E01/
-?  ?? S01/
-?     ?? A01/
-?        ?? ground_truth.npy
-?        ?? wifi-csi/
-?           ?? frame001.mat
-?           ?? frame002.mat
-?           ?? frame297.mat
-?? E02/
-?? E03/
-?? E04/
+  E01/S01/A01/
+    ground_truth.npy
+    wifi-csi/frame001.mat ... frame297.mat
+  E02/
+  E03/
+  E04/
 ```
 
-Each sequence is identified by `scene / subject / action`. CSI frames contain amplitude data with shape `(3, 114, 10)`. The ground-truth file contains 17 three-dimensional joints over 297 frames with shape `(297, 17, 3)`. An optional `wifi-csi-packed.npy` may be placed inside each `wifi-csi/` directory for packed frame loading.
+CSI 单帧幅度数据形状为 `(3,114,10)`，姿态标签形状为 `(297,17,3)`。
 
-## Result structure
+## 结果结构
 
-The tracked `result/` directory is intentionally empty. Runtime outputs are ignored and remain local.
-
-```text
-result/
-?? .gitkeep
-```
-
-WiFi-JEPA pre-training results:
+运行结果不会提交到 GitHub，只保存在本地：
 
 ```text
 WIFIJEPA/results/pretrain/<protocol>/<split>/seed<seed>/<configuration-id>/
-?? encoder.pth
-?? pretrain_manifest.json
-?? pretrain_metrics.yaml
-```
+  encoder.pth
+  pretrain_manifest.json
+  pretrain_metrics.yaml
 
-WiFi-JEPA fine-tuning results:
-
-```text
 WIFIJEPA/result_metafi_ssl/<method>/<protocol>/<split>/seed<seed>/<label-budget>/<configuration-id>/
-?? best_absolute.pth
-?? best_pelvis.pth
-?? best_pa.pth
-?? metrics.csv
-?? final_report.json
-?? summary_absolute.json
-?? summary_pelvis.json
-?? summary_pa.json
-?? test_outputs_absolute.npz
-?? done.txt
+  best_absolute.pth
+  metrics.csv
+  final_report.json
+  done.txt
 ```
 
-The absolute checkpoint and `test_mpjpe_mm` are the primary outputs for actual joint position error. Pelvis-aligned MPJPE and PA-MPJPE are diagnostic metrics.
+`best_absolute.pth` 和 `test_mpjpe_mm` 是实际关节位置误差的主要输出。
 
-## Installation
+## 安装
 
-Use Python 3.10 or newer. Install a PyTorch/torchvision pair compatible with the local CUDA driver, then install the remaining dependencies:
+建议使用 Python 3.10 或更高版本，并先安装与本机 CUDA 驱动兼容的 PyTorch 和 torchvision：
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
-
-The repository only contains code and configuration. Prepare the dataset locally before running training.
