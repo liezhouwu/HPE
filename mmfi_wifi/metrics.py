@@ -15,23 +15,24 @@ MM-Fi 论文 (NeurIPS 2023) 的文字定义与官方代码实现不一致, 两�
   "MPJPE measures ... after aligning the pelvis of the estimated and true
    3D pose."  即先把预测和 GT 都平移到骨盆原点再算欧氏距离。
 
-骨盆定义: 17 关键点 COCO 布局中 L_hip=11, R_hip=12 的中点。
+骨盆定义: 3D GT 使用 H36M-style 布局的 joint0；GT 中恰等于 joints1,4 的中点。
 """
 
 import numpy as np
 
-# COCO-17 关键点名称 (索引即 MM-Fi ground_truth.npy 的顺序)
-KP_NAMES = ['nose', 'L_eye', 'R_eye', 'L_ear', 'R_ear',
-            'L_shoulder', 'R_shoulder', 'L_elbow', 'R_elbow',
-            'L_wrist', 'R_wrist', 'L_hip', 'R_hip',
-            'L_knee', 'R_knee', 'L_ankle', 'R_ankle']
-
-PELVIS_JOINTS = (11, 12)  # L_hip, R_hip
+# 3D ground_truth.npy is H36M-style, unlike the 2D COCO modality arrays.
+# Empirical contract: GT joint0 == midpoint(joint1, joint4).
+KP_NAMES = ['pelvis', 'R_hip', 'R_knee', 'R_ankle',
+            'L_hip', 'L_knee', 'L_ankle', 'spine', 'thorax', 'neck', 'head',
+            'L_shoulder', 'L_elbow', 'L_wrist', 'R_shoulder', 'R_elbow', 'R_wrist']
+POSE_LAYOUT = 'mmfi_3d_h36m_root0_v1'
+ROOT_JOINT = 0
+PELVIS_JOINTS = (1, 4)  # anatomical hip pair, not the root index of predictions
 
 
 def pelvis_of(kps):
-    """kps: (..., 17, 3) -> pelvis: (..., 3)"""
-    return 0.5 * (kps[..., PELVIS_JOINTS[0], :] + kps[..., PELVIS_JOINTS[1], :])
+    """NumPy/Torch (...,17,3) -> (...,3), root is explicit predicted joint0."""
+    return kps[..., ROOT_JOINT, :]
 
 
 def to_root_relative(kps):

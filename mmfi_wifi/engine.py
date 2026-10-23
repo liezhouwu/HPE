@@ -114,8 +114,33 @@ def setup_cuda(device, verbose=True):
 
 def root_relative(gt):
     """gt: (B, 17, 3) torch -> 骨盆相对坐标 (B, 17, 3)"""
-    pelvis = 0.5 * (gt[:, 11, :] + gt[:, 12, :])  # (B, 3)
+    pelvis = pelvis_of(gt)  # MM-Fi 3D root0, not 2D COCO joints11/12
     return gt - pelvis.unsqueeze(1)
+
+
+POSE_LAYOUT_CONTRACT = 'mmfi_3d_h36m_root0_v1'
+
+
+def validate_pose_layout_config(config):
+    """Fail closed instead of mixing 2D COCO and 3D MM-Fi layouts."""
+    actual = config.get('pose_layout')
+    if actual != POSE_LAYOUT_CONTRACT:
+        raise ValueError(
+            f"pose_layout must be {POSE_LAYOUT_CONTRACT!r}; got {actual!r}"
+        )
+
+
+def validate_pose_layout_batch(gt, *, atol=1e-5):
+    """Check the MM-Fi 3D root contract on a loaded ground-truth batch."""
+    if gt.ndim != 3 or tuple(gt.shape[1:]) != (17, 3):
+        raise ValueError(f'MM-Fi 3D GT must have shape (B,17,3), got {tuple(gt.shape)}')
+    expected_root = 0.5 * (gt[:, 1, :] + gt[:, 4, :])
+    error = torch.max(torch.abs(gt[:, 0, :] - expected_root)).item()
+    if error > atol:
+        raise ValueError(
+            'MM-Fi 3D GT layout contract failed: joint0 != midpoint(joint1,joint4) '
+            f'(max error {error:.6g})'
+        )
 
 
 def resolve_target_space(config):
@@ -920,6 +945,7 @@ def evaluate(model, loader, device, use_amp, criterion, max_batches=None,
         if use_channels_last and csi.dim() == 4:
             csi = csi.to(memory_format=torch.channels_last)
         gt = batch['output'].to(device, dtype=torch.float, non_blocking=True)
+        validate_pose_layout_batch(gt)
         target = make_target(gt, target_space)
 
         with torch.amp.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
@@ -1113,6 +1139,7 @@ def train_one_experiment(dataset_root, config, result_dir, device,
 
     返回: summary dict
     """
+    validate_pose_layout_config(config)
     _ensure_fresh_result_dir(result_dir, resume)
     if val_every <= 0:
         raise ValueError("val_every 必须 > 0")
@@ -1688,6 +1715,7 @@ def train_one_experiment(dataset_root, config, result_dir, device,
             if use_channels_last and csi.dim() == 4:
                 csi = csi.to(memory_format=torch.channels_last)
             gt = batch['output'].to(device, dtype=torch.float, non_blocking=True)
+            validate_pose_layout_batch(gt)
             target = make_target(gt, target_space)
 
             if augment:

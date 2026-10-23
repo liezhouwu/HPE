@@ -4,7 +4,7 @@
 dataset_root: ../my_dataset
 baseline_config: configs/baseline_config.yaml
 device: cuda
-protocol: protocol2
+protocol: protocol1
 single_split: random_split
 all_splits:
 - random_split
@@ -12,7 +12,7 @@ all_splits:
 - cross_scene_split
 scope: strict
 seed: 42
-label_budget: 1shot
+label_budget: 4shot
 official_alignment: true
 pretrain:
   epochs: 10

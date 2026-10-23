@@ -9,7 +9,7 @@ baseline_config: configs/baseline_config.yaml
 # 运行设备。
 device: cuda
 # 默认协议。
-protocol: protocol3
+protocol: protocol1
 # single 命令默认划分；可被 --split 覆盖。
 single_split: random_split
 all_splits: [random_split, cross_subject_split, cross_scene_split]

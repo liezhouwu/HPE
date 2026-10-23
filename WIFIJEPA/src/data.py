@@ -8,11 +8,12 @@ import torch
 
 from mmfi_wifi import data as mmfi_data
 from mmfi_wifi.data import _load_csi_frame, _load_packed_csi
+from mmfi_wifi.data import _load_ground_truth
 from pose_ssl.metafi.pretrain_data import MetaFiPretrainDataset
 
 
 def preprocess_without_minmax(data):
-    # Keep NaN/Inf handling while skipping min-max normalization for ablation.
+    # ??????????? min-max?
     data = np.asarray(data, dtype=np.float64)
     data[np.isinf(data)] = np.nan
     for index in range(data.shape[2]):
@@ -39,7 +40,7 @@ def _load_raw_packed_frame(packed_path, index: int):
 
 @contextmanager
 def csi_preprocessing(normalize: bool):
-    """Temporarily select the CSI normalization path for ablation."""
+    """?????? CSI ?????????"""
     if normalize:
         yield
         return
@@ -55,7 +56,7 @@ def csi_preprocessing(normalize: bool):
 
 
 class WiFiJEPAData(MetaFiPretrainDataset):
-    """Load CSI within the audited sequence boundary."""
+    """?????????? CSI ??????????????"""
 
     def __init__(self, *args, normalize: bool = True, **kwargs):
         self.normalize = normalize
@@ -69,3 +70,27 @@ class WiFiJEPAData(MetaFiPretrainDataset):
         else:
             data = _load_raw_frame(Path(record.frame_path))
         return torch.as_tensor(data, dtype=torch.float32).contiguous()
+
+
+class WiFiJEPAPoseData(WiFiJEPAData):
+    """Read pose labels only for the audited few-shot training sequences."""
+
+    def __init__(self, *args, pose_keys, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pose_keys = frozenset(pose_keys)
+        if not self.pose_keys.issubset(self.sequence_keys):
+            raise ValueError("pose_keys must be contained in the pretraining sequences")
+
+    def __getitem__(self, index):
+        record = self._records[index]
+        sample = super().__getitem__(index)
+        if record.sequence_key not in self.pose_keys:
+            return sample, None
+        gt_path = (
+            self.dataset_root / record.sequence_key.scene / record.sequence_key.subject
+            / record.sequence_key.action / "ground_truth.npy"
+        )
+        pose = torch.as_tensor(
+            _load_ground_truth(str(gt_path))[record.frame_index].copy(), dtype=torch.float32
+        )
+        return sample, pose

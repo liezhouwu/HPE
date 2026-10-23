@@ -94,14 +94,19 @@ def make_small_pretrain_manifest(
     *,
     fraction: float,
     seed: int,
+    required_keys: Collection[SequenceKey] = (),
 ) -> DataManifest:
-    """复制数据边界，仅将 pretrain_keys 替换为固定分层子集。"""
+    """复制边界为固定子集，并可保证指定训练序列进入预训练。"""
 
     if manifest.scope != "strict":
         raise ValueError("小样本入口当前仅支持 strict SSL")
     selected = sample_pretrain_sequences(
         manifest.internal_train_keys, fraction=fraction, seed=seed, split=manifest.split
     )
+    required = frozenset(required_keys)
+    if not required.issubset(manifest.internal_train_keys):
+        raise ValueError("required pretraining keys must be inside internal_train_keys")
+    selected = selected | required
     return DataManifest(
         protocol=manifest.protocol,
         split=manifest.split,

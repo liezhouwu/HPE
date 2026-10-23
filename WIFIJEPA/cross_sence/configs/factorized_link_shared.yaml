@@ -1,0 +1,65 @@
+experiment:
+  dataset_root: ../my_dataset
+  audit_root: WIFIJEPA/audit
+  pretrain_root: WIFIJEPA/cross_sence/runs/pretrain
+  finetune_root: WIFIJEPA/cross_sence/runs/finetune
+  protocol: protocol3
+  scope: strict
+  split: cross_scene_split
+  label_budget: 4shot
+  seed: 42
+  device: cuda
+  num_workers: 0
+  mode: jepa
+
+input:
+  channels: 3
+  subcarriers: 114
+  time: 10
+  links: 3
+  amplitude_only: true
+  use_existing_preprocess: true
+  disable_normalization: false
+
+model:
+  embed_dim: 768
+  depth: 6
+  num_heads: 6
+  ffn_dim: 3072
+  predictor_depth: 2
+
+mask:
+  mode: link
+  masked_links: 2
+
+pretrain:
+  variant: factorized_link_shared
+  sequence_fraction: 0.2
+  epochs: 10
+  batch_size: 32
+  amp: true
+  lr_min: 0.00001
+  learning_rate: 0.00024
+  weight_decay: 0.01
+  ema_start: 0.996
+  ema_end: 1.0
+  residual_loss_weight: 1.0
+  shared_std_floor: 0.25
+
+finetune:
+  # Main mechanism comparison: keep the downstream CLS readout identical to original JEPA-m2.
+  encoder_readout: cls
+  epochs: 25
+  num_workers: 0
+  val_every: 5
+  optimizer: adamw
+  learning_rate: 0.0003
+  weight_decay: 0.0
+  scheduler: cosine
+  lr_min: 0.000001
+  dropout_p: 0.0
+  selection_metric: mpjpe
+  early_stopping_patience: 10
+  use_epoch_patience: false
+  loss_name: mse
+  relative_aux_weight: 0.0

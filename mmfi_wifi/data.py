@@ -526,7 +526,7 @@ def make_manual_test_dataset(dataset_root, config):
 
 
 class ShuffledTargetDataset(Dataset):
-    """Pair each input sample with a deterministically shuffled pose target."""
+    """????????????????????????????"""
 
     def __init__(self, dataset, seed: int = 42):
         self.dataset = dataset
@@ -583,7 +583,7 @@ def _preload_worker_init(worker_id):
 def make_dataloader(dataset, is_training, generator, batch_size, num_workers=8,
                     prefetch_factor=4, sequence_balanced=False,
                     frames_per_sequence=16):
-    """Build a frame loader, optionally sampling a fixed number per sequence."""
+    """?? DataLoader????????????????"""
     kwargs = dict(batch_size=batch_size, collate_fn=collate_fn_padd,
                   drop_last=is_training, generator=generator,
                   pin_memory=True, num_workers=num_workers)

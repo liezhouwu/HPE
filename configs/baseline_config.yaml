@@ -7,7 +7,7 @@ dataset_root: ../my_dataset  # 可选：任意有效 MMFi 数据集根目录。
 # 训练设备；可选 cuda、cuda:0、cpu。GPU 训练通常使用 cuda。
 device: cuda  # 可选：cuda、cuda:0、cpu。
 # 默认协议；protocol1=14 个日常动作，protocol2=13 个康复动作，protocol3=全部 27 个动作。
-protocol: protocol2  # 可选：protocol1、protocol2、protocol3。
+protocol: protocol1  # 可选：protocol1、protocol2、protocol3。
 # single 命令默认运行的划分；可被命令行 --split 覆盖。
 single_split: random_split  # 可选：random_split、cross_subject_split、cross_scene_split。
 # all 命令依次运行的划分列表；可删减为任意非空子集。

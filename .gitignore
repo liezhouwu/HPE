@@ -1,4 +1,4 @@
-# Strict allowlist: everything is ignored unless explicitly permitted below.
+﻿# Strict core-only export. Runtime outputs, data, tests, analysis and caches are excluded.
 *
 !/.gitignore
 !/README.md
@@ -17,27 +17,23 @@
 !/scripts/run.py
 !/scripts/report_results.py
 !/scripts/metafi_ssl/
-!/scripts/metafi_ssl/audit_data.py
-!/scripts/metafi_ssl/config_loader.py
-!/scripts/metafi_ssl/finetune.py
-!/scripts/metafi_ssl/pretrain.py
-!/scripts/metafi_ssl/profile_hardware.py
-!/scripts/metafi_ssl/task_spec.py
-!/scripts/metafi_ssl/train_supervised.py
+!/scripts/metafi_ssl/*.py
 !/scripts/vit_ssl/
 !/scripts/vit_ssl/*.py
 !/scripts/reproduction/
 !/scripts/reproduction/*.py
 !/WIFIJEPA/
 !/WIFIJEPA/__init__.py
+!/WIFIJEPA/configs/
+!/WIFIJEPA/configs/*.yaml
 !/WIFIJEPA/src/
 !/WIFIJEPA/src/*.py
 !/WIFIJEPA/scripts/
 !/WIFIJEPA/scripts/*.py
-!/WIFIJEPA/configs/
-!/WIFIJEPA/configs/*.yaml
-!/WIFIJEPA/tests/
-!/WIFIJEPA/tests/*.py
+!/WIFIJEPA/cross_sence/
+!/WIFIJEPA/cross_sence/*.py
+!/WIFIJEPA/cross_sence/configs/
+!/WIFIJEPA/cross_sence/configs/*.yaml
 !/dataset/
 !/dataset/.gitkeep
 !/result/

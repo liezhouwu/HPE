@@ -178,3 +178,88 @@ WIFIJEPA/result_metafi_ssl/<method>/<protocol>/<split>/seed<seed>/<标签预算>
 5. 同时记录绝对 MPJPE、pelvis/PA 指标、骨盆位置偏差、姿态 spread、Corr51、各目标链路 loss 和优化步数。
 
 只有当 WiFi-JEPA 在多个划分和标签量下相对同结构监督对照降低 absolute MPJPE，且不依赖单个随机种子时，才将收益描述为稳定改善。
+
+# P3 跨环境少样本 WiFi-JEPA
+
+本节补充 `WIFIJEPA/cross_sence/` 的跨环境少样本实验方案。实验固定 StructuredViT 编码器、P3 严格数据边界、`cross_scene_split` 划分、标签预算和下游训练规则，用于比较监督控制、原始 JEPA-m2、共享/特异潜变量 JEPA，以及跨帧与跨链路联合预测。
+
+## 项目方案与流程
+
+跨环境实验首先读取 `WIFIJEPA/audit/` 中已经生成的数据审计 manifest，只从源环境序列中按 `sequence_fraction` 抽取预训练子集，目标环境 E04 保持未见。随后根据配置构造两类自监督任务：`factorized_link_shared` 在可见 CSI 链路上学习共享潜变量，并用独立 residual predictor 表达链路差异；`temporal_link_joint` 在同一序列内取上下文帧和未来帧，同时遮挡指定链路和未来窗口。
+
+训练阶段由 context encoder 编码可见 token，target encoder 生成停止梯度的目标潜变量，predictor 只在 mask 位置计算潜变量损失。target encoder 使用 EMA 更新。预训练完成后导出 encoder、配置快照、manifest 和指标文件。下游微调继续使用同一 StructuredViT，并通过 `cls` 或 `shared_mean` readout 接入统一 `PoseHead`，输出 MM-Fi 的 17 个三维关节坐标。
+
+运行顺序如下：
+
+```text
+数据审计 manifest
+    ↓
+源环境序列抽样（默认 20%）
+    ↓
+链路 mask 或跨帧+跨链路 joint mask
+    ↓
+context/target encoder 潜变量预测
+    ↓
+EMA 更新 target encoder
+    ↓
+导出 encoder checkpoint
+    ↓
+统一 StructuredViT + PoseHead 下游微调
+    ↓
+输出 absolute MPJPE、root0-relative MPJPE 和 PA-MPJPE
+```
+
+## 核心代码文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `WIFIJEPA/cross_sence/models.py` | 实现共享/特异潜变量 JEPA、跨帧跨链路 JEPA、时序窗口数据集和下游共享 readout 模型。 |
+| `WIFIJEPA/cross_sence/pretrain_experiments.py` | 加载配置和审计 manifest，构造数据与模型，执行跨环境预训练并保存运行产物。 |
+| `WIFIJEPA/cross_sence/configs/*.yaml` | 六组主比较、readout 消融和时序联合预测配置。 |
+| `WIFIJEPA/src/model.py` | StructuredViT encoder、Predictor、MAE/JEPA 基础模型和姿态模型。 |
+| `WIFIJEPA/src/masking.py` | 时间-链路网格上的整条链路 mask。 |
+| `WIFIJEPA/src/data.py` | MM-Fi CSI 读取、预处理和 WiFi-JEPA 数据集。 |
+| `WIFIJEPA/src/paths.py` | 审计文件、预训练 checkpoint 和结果目录的统一解析。 |
+| `WIFIJEPA/scripts/pretrain.py` | 标准 WiFi-JEPA/MAE 预训练入口，提供公共 batch 与 EMA 工具。 |
+| `WIFIJEPA/scripts/finetune.py` | 监督、MAE、JEPA 及跨环境 readout 的下游微调入口。 |
+| `pose_ssl/metafi/pretrain_subset.py` | 按完整序列构造少样本预训练 manifest。 |
+| `mmfi_wifi/data.py`、`mmfi_wifi/data_manifest.py`、`mmfi_wifi/engine.py` | CSI 数据加载、审计 manifest 和训练引擎支撑。 |
+
+## 运行示例
+
+从仓库根目录执行：
+
+```powershell
+python WIFIJEPA\cross_sence\pretrain_experiments.py --config WIFIJEPA\cross_sence\configs\factorized_link_shared.yaml
+python WIFIJEPA\scripts\finetune.py --config WIFIJEPA\cross_sence\configs\factorized_link_shared.yaml
+```
+
+跨帧与跨链路联合预测使用：
+
+```powershell
+python WIFIJEPA\cross_sence\pretrain_experiments.py --config WIFIJEPA\cross_sence\configs\temporal_link_joint.yaml
+python WIFIJEPA\scripts\finetune.py --config WIFIJEPA\cross_sence\configs\temporal_link_joint.yaml
+```
+
+## 结果目录结构
+
+运行产物只保存在本地，不提交到 GitHub：
+
+```text
+WIFIJEPA/cross_sence/runs/pretrain/
+  <protocol>/<split>/seed<seed>/<configuration-id>/
+    encoder.pth
+    latest.pth
+    config.yaml
+    pretrain_manifest.json
+    pretrain_metrics.yaml
+
+WIFIJEPA/cross_sence/runs/finetune/
+  <method>/<protocol>/<split>/seed<seed>/<label-budget>/<configuration-id>/
+    best_absolute.pth
+    metrics.csv
+    final_report.json
+    done.txt
+```
+
+`encoder.pth` 用于下游初始化；`metrics.csv` 和 `final_report.json` 用于记录 absolute MPJPE、root0-relative MPJPE 与 PA-MPJPE。审计 manifest、checkpoint、日志、数据集和正式结果目录均属于本地运行产物。E04 test 只用于最终评估，不用于 checkpoint 或超参数选择。

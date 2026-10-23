@@ -1,10 +1,10 @@
 
 experiment:
-  dataset_root: dataset
+  dataset_root: ../my_dataset
   audit_root: WIFIJEPA/audit
   pretrain_root: WIFIJEPA/results/pretrain
   finetune_root: WIFIJEPA/result_metafi_ssl
-  protocol: protocol1
+  protocol: protocol2
   scope: strict
   split: random_split
   label_budget: 2shot
@@ -12,9 +12,10 @@ experiment:
   seed: 42
   device: cuda
   num_workers: 0
-  mode: supervised  # supervised ? jepa
+  mode: mae  # supervised / jepa / mae
   pretrain_checkpoint: null
   pretrain_manifest: null
+  # mode: mae 时改为对应 StructuredViT-MAE checkpoint；也可用下方预训练默认路径
 
 # WiFi-JEPA MM-Fi 首轮配置
 input:
@@ -35,7 +36,7 @@ model:
 
 mask:
   mode: link
-  masked_links: 1
+  masked_links: 2
   # 后续消融改为 2；每次实验保持其余设置不变。
 
 pretrain:
@@ -43,6 +44,7 @@ pretrain:
   epochs: 10
   batch_size: 32
   max_batches: null
+  log_every_batches: 20
   amp: true
   lr_min: 0.00001
   learning_rate: 0.00024
@@ -65,3 +67,13 @@ finetune:
   early_stopping_patience: 10
   use_epoch_patience: false
   loss_name: mse
+  # Keep absolute-coordinate MSE primary; set >0 only for the root-relative auxiliary ablation.
+  relative_aux_weight: 0.0
+
+# ===== StructuredViT VIT-MAE（experiment.mode: mae 时使用）=====
+mae:
+  encoder_contract: structured_vit_cls_pretrained_v2
+  mask_ratio: 0.75
+  decoder_dim: 512
+  decoder_depth: 8
+  decoder_heads: 16

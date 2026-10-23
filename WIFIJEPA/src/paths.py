@@ -13,6 +13,7 @@ _ARTIFACTS = {
     "label_manifest": "fewshot_manifest.json",
     "axis_stats": "label_stats.json",
 }
+MAE_ENCODER_CONTRACT = "structured_vit_cls_pretrained_v2"
 
 
 def repo_path(value: str | Path) -> Path:
@@ -110,6 +111,7 @@ def pretrain_output(config: dict) -> Path:
     from mmfi_wifi.data_manifest import DataManifest
 
     data_fp = DataManifest.read_json(audit).fingerprint()
+    mode = str(exp.get("mode", "jepa"))
     settings = {
         "input": config["input"],
         "model": config["model"],
@@ -117,10 +119,24 @@ def pretrain_output(config: dict) -> Path:
         "pretrain": config["pretrain"],
         "manifest": data_fp,
     }
+    if bool(config["pretrain"].get("include_labeled_sequences", False)):
+        labels = json.loads(audit_paths(config)["label_manifest"].read_text(encoding="utf-8"))
+        settings["label_manifest_fingerprint"] = labels.get("fingerprint")
     fraction = int(float(config["pretrain"]["sequence_fraction"]) * 100)
     epochs = int(config["pretrain"]["epochs"])
     masked = int(config["mask"]["masked_links"])
-    tag = f"u{fraction:02d}-e{epochs}-m{masked}-{_fingerprint(settings)}"
+    if mode == "mae":
+        # Keep MAE checkpoints separate from legacy WiFi-JEPA checkpoints even
+        # when they share the same data/model/epoch settings.
+        mae = dict(config.get("mae", {}))
+        mae.setdefault("encoder_contract", MAE_ENCODER_CONTRACT)
+        settings["mae"] = mae
+        tag = f"u{fraction:02d}-e{epochs}-mae-clsv2-{_fingerprint(settings)}"
+    elif mode == "pose_jepa":
+        settings["pose_pretrain"] = config.get("pose_pretrain", {})
+        tag = f"u{fraction:02d}-e{epochs}-m{masked}-pose-{_fingerprint(settings)}"
+    else:
+        tag = f"u{fraction:02d}-e{epochs}-m{masked}-{_fingerprint(settings)}"
     root = repo_path(exp.get("pretrain_root", "WIFIJEPA/results/pretrain"))
     return root / protocol / split / f"seed{seed}" / tag
 
@@ -139,14 +155,19 @@ def finetune_output(config: dict) -> Path:
     exp = config["experiment"]
     protocol, _, split, seed, budget = _identity(config)
     mode = exp.get("mode", "supervised")
-    method = "wifi_jepa_amp" if mode == "jepa" else "sup_structured"
+    method = {
+        "jepa": "wifi_jepa_amp",
+        "pose_jepa": "wifi_jepa_amp_pose",
+        "mae": "vit_mae_structured",
+    }.get(mode, "sup_structured")
     from mmfi_wifi.data_manifest import DataManifest
     manifest_path = audit_paths(config)["manifest"]
     settings = {
         "mode": mode,
+        "pose_head": config.get("finetune", {}).get("pose_head", "mlp"),
         "finetune": config.get("finetune", {}),
         "manifest": DataManifest.read_json(manifest_path).fingerprint(),
-        "pretrain_checkpoint": str(pretrain_checkpoint(config)) if mode == "jepa" else None,
+        "pretrain_checkpoint": str(pretrain_checkpoint(config)) if mode in {"jepa", "mae"} else None,
     }
     root = repo_path(exp.get("finetune_root", "WIFIJEPA/results/finetune"))
     return (
