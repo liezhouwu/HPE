@@ -2,7 +2,7 @@ experiment:
   dataset_root: ../my_dataset
   audit_root: WIFIJEPA/audit
   pretrain_root: WIFIJEPA/cross_sence/runs/pretrain
-  finetune_root: WIFIJEPA/cross_sence/runs/finetune
+  finetune_root: WIFIJEPA/result_metafi_ssl
   protocol: protocol3
   scope: strict
   split: cross_scene_split

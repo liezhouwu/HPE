@@ -204,7 +204,7 @@ class Predictor(nn.Module):
 
     def forward(self, cls: Tensor, visible: Tensor, visible_ids: Tensor) -> Tensor:
         batch, n_tokens, dim = visible.shape[0], self.pos_embed.shape[1] - 1, visible.shape[-1]
-        full = self.mask_token.expand(batch, n_tokens, dim).clone()
+        full = self.mask_token.to(dtype=visible.dtype).expand(batch, n_tokens, dim).clone()
         full.scatter_(1, visible_ids.unsqueeze(-1).expand(-1, -1, dim), visible)
         sequence = torch.cat([cls[:, None], full], dim=1) + self.pos_embed
         return self.norm(self.blocks(sequence))[:, 1:]

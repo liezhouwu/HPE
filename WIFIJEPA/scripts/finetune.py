@@ -30,7 +30,12 @@ from WIFIJEPA.src.paths import (
     pretrain_manifest,
     repo_path,
 )
-from WIFIJEPA.cross_sence.models import SharedStructuredPoseModel
+from WIFIJEPA.cross_sence.models import (
+    SharedCLSStructuredPoseModel,
+    SharedFusionStructuredPoseModel,
+    SharedStructuredPoseModel,
+    TemporalPoseModel,
+)
 
 
 class AbsoluteWithRelativeAuxLoss(nn.Module):
@@ -117,6 +122,19 @@ def build_engine_config(config: dict, protocol: str, split: str, seed: int, epoc
         "use_compile": False,
     })
     finetune = config.get("finetune", {})
+    temporal_downstream = bool(finetune.get("temporal_downstream", False))
+    engine["temporal_downstream"] = temporal_downstream
+    if temporal_downstream:
+        context_frames = int(config["pretrain"].get("context_frames", 4))
+        future_frames = int(config["pretrain"].get("future_frames", 2))
+        engine["temporal_downstream_context_frames"] = context_frames
+        engine["temporal_downstream_future_frames"] = future_frames
+        engine["temporal_downstream_window_frames"] = context_frames + future_frames
+        engine["train_loader"] = dict(engine.get("train_loader", {}), batch_size=int(finetune.get("temporal_batch_size", 8)))
+        engine["validation_loader"] = dict(
+            engine.get("validation_loader", {}),
+            batch_size=int(finetune.get("temporal_validation_batch_size", 32)),
+        )
     for key in (
         "optimizer", "learning_rate", "weight_decay", "sgd_momentum", "scheduler",
         "lr_warmup_epochs", "lr_min", "lr_milestones", "lr_gamma", "dropout_p",
@@ -178,6 +196,17 @@ def run_split(config: dict, config_file: str) -> None:
             }[mode]
             if pretrain.get("method") != expected_method or pretrain.get("encoder_arch") != "structured_vit":
                 raise ValueError(f"{mode} checkpoint must be a {expected_method} StructuredViT checkpoint")
+            if bool(finetune.get("temporal_downstream", False)):
+                if pretrain.get("model_variant") != "temporal_link_jepa_v7":
+                    raise ValueError(
+                        "temporal downstream requires a temporal_link_jepa_v7 checkpoint"
+                    )
+                if saved_pretrain_config.get("pretrain", {}).get("variant") != "temporal_link_joint":
+                    raise ValueError(
+                        "temporal downstream requires pretrain.variant=temporal_link_joint"
+                    )
+                if "temporal_state_dict" not in pretrain:
+                    raise ValueError("temporal downstream checkpoint lacks temporal_state_dict")
             if mode == "mae" and pretrain.get("encoder_contract") != MAE_ENCODER_CONTRACT:
                 raise ValueError(
                     "MAE checkpoint does not train CLS through reconstruction; "
@@ -215,14 +244,21 @@ def run_split(config: dict, config_file: str) -> None:
         engine_config["relative_aux_weight"] = relative_aux_weight
         pose_head = str(finetune.get("pose_head", "mlp"))
         encoder_readout = str(finetune.get("encoder_readout", "cls"))
+        temporal_downstream = bool(finetune.get("temporal_downstream", False))
         if pose_head not in {"mlp", "joint_query"}:
             raise ValueError("finetune.pose_head must be 'mlp' or 'joint_query'")
-        if encoder_readout not in {"cls", "shared_mean"}:
-            raise ValueError("finetune.encoder_readout must be 'cls' or 'shared_mean'")
-        if encoder_readout == "shared_mean" and pose_head != "mlp":
-            raise ValueError("shared_mean readout currently supports pose_head: mlp only")
-        factorized = bool(pretrain and pretrain.get("model_variant") == "factorized_link_shared_v1")
-        if factorized and encoder_readout == "shared_mean" and "shared_projection_state_dict" not in pretrain:
+        if encoder_readout not in {"cls", "shared_mean", "shared_cls", "shared_fusion"}:
+            raise ValueError(
+                "finetune.encoder_readout must be 'cls', 'shared_mean', 'shared_cls', or 'shared_fusion'"
+            )
+        if encoder_readout in {"shared_mean", "shared_cls", "shared_fusion"} and pose_head != "mlp":
+            raise ValueError(
+                "shared_mean and shared_cls readouts currently support pose_head: mlp only"
+            )
+        factorized = bool(
+            pretrain and str(pretrain.get("model_variant", "")).startswith("factorized_link_shared")
+        )
+        if factorized and encoder_readout in {"shared_mean", "shared_cls", "shared_fusion"} and "shared_projection_state_dict" not in pretrain:
             raise ValueError("factorized checkpoint has no shared_projection_state_dict")
         engine_config["pose_head"] = pose_head
         engine_config["encoder_readout"] = encoder_readout
@@ -235,8 +271,11 @@ def run_split(config: dict, config_file: str) -> None:
         identity = RunIdentity(
             method=method,
             encoder_arch=(
+                "structured_vit_temporal" if temporal_downstream else
                 "structured_vit_joint_query" if pose_head == "joint_query" else
                 "structured_vit_shared_mean" if encoder_readout == "shared_mean" else
+                "structured_vit_shared_cls" if encoder_readout == "shared_cls" else
+                "structured_vit_shared_fusion" if encoder_readout == "shared_fusion" else
                 "structured_vit"
             ),
             protocol=run_cfg["protocol"],
@@ -277,8 +316,23 @@ def run_split(config: dict, config_file: str) -> None:
         )
 
         def factory(*, dropout_p: float, target_space: str) -> nn.Module:
-            if encoder_readout == "shared_mean":
+            if temporal_downstream:
+                model = TemporalPoseModel(
+                    dropout_p=dropout_p,
+                    window_frames=int(pretrain_cfg.get("pretrain", {}).get("context_frames", 4))
+                    + int(pretrain_cfg.get("pretrain", {}).get("future_frames", 2)),
+                    temporal_depth=int(pretrain_cfg.get("pretrain", {}).get("temporal_depth", 1)),
+                    # offsets are [-context+1, ..., 0, ..., future], so the
+                    # anchor (offset 0) is at index context_frames - 1.
+                    anchor_frame=int(pretrain_cfg.get("pretrain", {}).get("context_frames", 4)) - 1,
+                    **encoder_cfg,
+                )
+            elif encoder_readout == "shared_mean":
                 model = SharedStructuredPoseModel(dropout_p=dropout_p, **encoder_cfg)
+            elif encoder_readout == "shared_cls":
+                model = SharedCLSStructuredPoseModel(dropout_p=dropout_p, **encoder_cfg)
+            elif encoder_readout == "shared_fusion":
+                model = SharedFusionStructuredPoseModel(dropout_p=dropout_p, **encoder_cfg)
             else:
                 model_cls = JointQueryPoseModel if pose_head == "joint_query" else StructuredPoseModel
                 model = model_cls(dropout_p=dropout_p, **query_cfg, **encoder_cfg) if pose_head == "joint_query" else model_cls(
@@ -286,7 +340,14 @@ def run_split(config: dict, config_file: str) -> None:
                 )
             if pretrain is not None:
                 model.encoder.load_state_dict(pretrain["encoder_state_dict"], strict=True)
-                if encoder_readout == "shared_mean" and "shared_projection_state_dict" in pretrain:
+                if temporal_downstream:
+                    temporal_state = pretrain.get("temporal_state_dict")
+                    if not temporal_state:
+                        raise ValueError(
+                            "temporal downstream requires a v7 checkpoint with temporal_state_dict"
+                        )
+                    model.load_temporal_state_dict(temporal_state)
+                if encoder_readout in {"shared_mean", "shared_cls", "shared_fusion"} and "shared_projection_state_dict" in pretrain:
                     model.shared_projection.load_state_dict(
                         pretrain["shared_projection_state_dict"], strict=True
                     )

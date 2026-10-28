@@ -1,8 +1,8 @@
 experiment:
   dataset_root: ../my_dataset
   audit_root: WIFIJEPA/audit
-  pretrain_root: WIFIJEPA/cross_sence/runs/pretrain
-  finetune_root: WIFIJEPA/cross_sence/runs/finetune
+  pretrain_root: WIFIJEPA/cross_sence/runs/pretrain_v3
+  finetune_root: WIFIJEPA/result_metafi_ssl
   protocol: protocol3
   scope: strict
   split: cross_scene_split
@@ -34,6 +34,8 @@ mask:
 
 pretrain:
   variant: factorized_link_shared
+  objective_version: link_primary_shared_aux_v5
+  shared_latent_norm: true
   sequence_fraction: 0.2
   epochs: 10
   batch_size: 32
@@ -43,12 +45,13 @@ pretrain:
   weight_decay: 0.01
   ema_start: 0.996
   ema_end: 1.0
-  residual_loss_weight: 1.0
+  residual_loss_weight: 0.1
   shared_std_floor: 0.25
+  max_grad_norm: 1.0
 
 finetune:
   # Main mechanism comparison: keep the downstream CLS readout identical to original JEPA-m2.
-  encoder_readout: cls
+  encoder_readout: shared_fusion
   epochs: 25
   num_workers: 0
   val_every: 5

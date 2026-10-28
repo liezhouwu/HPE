@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import math
 import os
 from pathlib import Path
@@ -17,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from pose_ssl.metafi.pretrain_subset import make_small_pretrain_manifest, selection_summary
 from mmfi_wifi.data_manifest import DataManifest
+from mmfi_wifi.provenance import build_run_provenance, write_run_provenance
 from WIFIJEPA.scripts.pretrain import collate_anchors, cosine_momentum
 from WIFIJEPA.src.data import WiFiJEPAData, csi_preprocessing
 from WIFIJEPA.src.paths import audit_paths, pretrain_output
@@ -49,6 +52,9 @@ def _model_and_dataset(config: dict, manifest: DataManifest):
             n_masked_links=int(config["mask"]["masked_links"]),
             residual_loss_weight=float(pretrain.get("residual_loss_weight", 1.0)),
             shared_std_floor=float(pretrain.get("shared_std_floor", 0.25)),
+            shared_latent_norm=bool(pretrain.get("shared_latent_norm", True)),
+            separate_residual_projection=bool(pretrain.get("separate_residual_projection", False)),
+            residual_std_floor=float(pretrain.get("residual_std_floor", 0.1)),
         )
         dataset = WiFiJEPAData(
             str(dataset_root), manifest.pretrain_keys,
@@ -71,6 +77,11 @@ def _model_and_dataset(config: dict, manifest: DataManifest):
             future_frames=future_frames,
             masked_links=int(config["mask"]["masked_links"]),
             mask_mode=str(config["mask"].get("mode", "joint")),
+            temporal_depth=int(pretrain.get("temporal_depth", 1)),
+            temporal_readout_input=str(pretrain.get("temporal_readout_input", "masked")),
+            link_mask_probability=float(
+                pretrain.get("link_mask_probability", 0.0)
+            ),
         )
         dataset = TemporalWindowDataset(
             str(dataset_root), manifest.pretrain_keys,
@@ -104,7 +115,7 @@ def _signature(config: dict, manifest: DataManifest, variant: str) -> dict:
     }
 
 
-def run(config: dict) -> Path:
+def run(config: dict, source_config: Path | None = None) -> Path:
     run_cfg = config["experiment"]
     pretrain_cfg = config["pretrain"]
     if str(run_cfg.get("mode", "jepa")) != "jepa":
@@ -127,6 +138,32 @@ def run(config: dict) -> Path:
     (output / "config.yaml").write_text(
         yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
+    pretrain_identity = {
+        "method": "wifi_jepa_amp",
+        "encoder_arch": "structured_vit",
+        "protocol": manifest.protocol,
+        "split": manifest.split,
+        "data_scope": manifest.scope,
+        "pretrain_seed": int(run_cfg["seed"]),
+        "label_budget": str(run_cfg.get("label_budget", "none")),
+        "model_variant": str(pretrain_cfg.get("variant")),
+        "manifest_fingerprint": manifest.fingerprint(),
+    }
+    provenance = build_run_provenance(
+        result_dir=output,
+        stage="pretrain",
+        config=config,
+        execution={
+            "config_fingerprint": hashlib.sha256(
+                json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+            ).hexdigest(),
+            "data_manifest_fingerprint": manifest.fingerprint(),
+        },
+        context={"source_config": str(source_config.resolve()) if source_config else None},
+        artifacts={"pretrain_manifest.json": str(manifest_path)},
+        identity=pretrain_identity,
+    )
+    write_run_provenance(output, provenance)
 
     seed = int(run_cfg["seed"])
     torch.manual_seed(seed)
@@ -167,8 +204,20 @@ def run(config: dict) -> Path:
         if completed.get("status") == "complete":
             if completed.get("signature") != signature:
                 raise ValueError(f"Completed checkpoint does not match config: {final_path}")
-            print(f"[SKIP] already complete: {final_path}", flush=True)
-            return final_path
+            compatible = True
+            if variant == "temporal_link_joint":
+                # Older temporal checkpoints created before temporal downstream
+                # support lack the temporal readout state and must be rebuilt.
+                compatible = bool(completed.get("temporal_state_dict"))
+            if compatible:
+                print(f"[SKIP] already complete: {final_path}", flush=True)
+                return final_path
+            print(
+                f"[REBUILD] stale checkpoint lacks temporal downstream state; "
+                f"restarting: {final_path}", flush=True,
+            )
+            final_path.unlink(missing_ok=True)
+            latest_path.unlink(missing_ok=True)
 
     if latest_path.is_file():
         latest = torch.load(latest_path, map_location=device, weights_only=True)
@@ -202,7 +251,9 @@ def run(config: dict) -> Path:
         for epoch in range(start_epoch, epochs):
             model.train()
             started = time.perf_counter()
-            total_loss = total_shared = total_residual = 0.0
+            total_loss = total_shared = total_variance = total_residual = total_residual_variance = 0.0
+            total_masked_loss = 0.0
+            total_link_mask_batches = 0
             total_masked = batches = 0
             for batch in loader:
                 batch = batch.to(device, non_blocking=True)
@@ -210,6 +261,17 @@ def run(config: dict) -> Path:
                 with torch.amp.autocast("cuda", enabled=use_amp):
                     loss, log = model(batch)
                 scaler.scale(loss).backward()
+                # Temporal windows have a larger effective prediction surface
+                # than the single-frame objective.  Keep their updates bounded
+                # even when an unusually hard window appears in a batch.
+                default_max_grad_norm = 1.0 if variant == "temporal_link_joint" else 0.0
+                max_grad_norm = float(pretrain_cfg.get("max_grad_norm", default_max_grad_norm))
+                if max_grad_norm > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        [parameter for parameter in model.parameters() if parameter.requires_grad],
+                        max_grad_norm,
+                    )
                 scaler.step(optimizer)
                 scaler.update()
                 step += 1
@@ -221,8 +283,12 @@ def run(config: dict) -> Path:
                 model.update_target(momentum)
                 total_loss += float(loss.detach())
                 total_shared += float(log.get("shared_loss", 0.0))
+                total_variance += float(log.get("shared_variance_loss", 0.0))
                 total_residual += float(log.get("residual_loss", 0.0))
+                total_residual_variance += float(log.get("residual_variance_loss", 0.0))
+                total_masked_loss += float(log.get("masked_loss", 0.0))
                 total_masked += int(log["masked_tokens"])
+                total_link_mask_batches += int(log.get("link_mask_batch", 0))
                 batches += 1
                 if batches >= steps_per_epoch:
                     break
@@ -231,12 +297,17 @@ def run(config: dict) -> Path:
                 "epoch": epoch + 1,
                 "loss": total_loss / batches,
                 "masked_tokens_per_batch": total_masked / batches,
+                "link_mask_fraction": total_link_mask_batches / batches,
                 "learning_rate": optimizer.param_groups[0]["lr"],
                 "optimizer_steps": step,
             }
             if variant == "factorized_link_shared":
                 row["shared_loss"] = total_shared / batches
+                row["shared_variance_loss"] = total_variance / batches
                 row["residual_loss"] = total_residual / batches
+                row["residual_variance_loss"] = total_residual_variance / batches
+            elif variant == "temporal_link_joint":
+                row["masked_loss"] = total_masked_loss / batches
             metrics.append(row)
             print(
                 f"[epoch {epoch + 1:03d}/{epochs:03d}] loss={row['loss']:.5f} "
@@ -246,7 +317,14 @@ def run(config: dict) -> Path:
             )
             if variant == "factorized_link_shared":
                 print(
-                    f"  shared={row['shared_loss']:.5f} residual={row['residual_loss']:.5f}",
+                    f"  shared={row['shared_loss']:.5f} variance={row['shared_variance_loss']:.5f} "
+                    f"residual={row['residual_loss']:.5f}",
+                    flush=True,
+                )
+            elif variant == "temporal_link_joint":
+                print(
+                    f"  masked={row['masked_loss']:.5f} "
+                    f"masked_main={row['masked_loss']:.5f}",
                     flush=True,
                 )
             latest = {
@@ -282,9 +360,14 @@ def run(config: dict) -> Path:
         "config": config,
         "encoder_state_dict": model.export_encoder_state_dict(),
         "metrics": metrics,
+        "run_id": provenance.get("run_id"),
+        "run_label": provenance.get("run_label"),
+        "provenance_file": "run_provenance.json",
     }
     if variant == "factorized_link_shared":
         checkpoint["shared_projection_state_dict"] = model.export_shared_projection_state_dict()
+    elif variant == "temporal_link_joint":
+        checkpoint["temporal_state_dict"] = model.export_temporal_state_dict()
     torch.save(checkpoint, final_path)
     (output / "pretrain_metrics.yaml").write_text(
         yaml.safe_dump(metrics, allow_unicode=True, sort_keys=False), encoding="utf-8"
@@ -299,7 +382,8 @@ def main() -> None:
         "--config", default="WIFIJEPA/cross_sence/configs/factorized_link_shared.yaml"
     )
     args = parser.parse_args()
-    run(load_config(Path(args.config)))
+    config_path = Path(args.config)
+    run(load_config(config_path), config_path)
 
 
 if __name__ == "__main__":

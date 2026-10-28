@@ -64,6 +64,7 @@ from .run_identity import (
     _assert_loadable_last_state,
     _load_exact_identity,
 )
+from .provenance import build_run_provenance, load_run_provenance, write_run_provenance
 
 
 # ============================================================
@@ -485,6 +486,7 @@ def finalize_metafi_run(
     config_fingerprint, execution_fingerprint, split_fingerprint,
     expected_test_samples, train_time_s, selection_metric, evaluate_fn=None,
     protocol=None, split=None, amp_dtype=torch.bfloat16, use_channels_last=False,
+    temporal_downstream=False,
 ):
     """Evaluate role checkpoints and publish all Task-7 artifacts transactionally."""
     if not isinstance(run_identity, RunIdentity):
@@ -512,6 +514,11 @@ def finalize_metafi_run(
     os.makedirs(staging_dir, exist_ok=False)
 
     try:
+        provenance = load_run_provenance(result_dir)
+        if provenance is None:
+            raise FileNotFoundError(
+                "finetune result is missing run_provenance.json; refusing ambiguous finalization"
+            )
         for role, filename in CHECKPOINT_FILENAMES.items():
             checkpoint_path = os.path.join(result_dir, filename)
             if not os.path.isfile(checkpoint_path):
@@ -536,6 +543,7 @@ def finalize_metafi_run(
                 role_model, test_loader, device, use_amp, criterion,
                 target_space=target_space, amp_dtype=amp_dtype,
                 use_channels_last=use_channels_last,
+                temporal_downstream=temporal_downstream,
             )
             if not isinstance(evaluation, EvaluationOutput):
                 raise TypeError('evaluate_fn 必须返回 EvaluationOutput')
@@ -567,6 +575,9 @@ def finalize_metafi_run(
                     run_identity.canonical_json().encode('utf-8')
                 ).hexdigest(),
                 'train_time_s': float(train_time_s),
+                'run_id': provenance.get('run_id'),
+                'run_label': provenance.get('run_label'),
+                'provenance_file': 'run_provenance.json',
             }
             _atomic_json_write(os.path.join(staging_dir, f'summary_{role.value}.json'), summary)
             role_summaries[role.value] = summary
@@ -586,6 +597,10 @@ def finalize_metafi_run(
         final_report = {
             'schema_version': 1,
             'primary_checkpoint_role': CheckpointRole.ABSOLUTE.value,
+            'run_id': provenance.get('run_id'),
+            'run_label': provenance.get('run_label'),
+            'provenance_file': 'run_provenance.json',
+            'provenance': provenance,
             'roles': role_summaries,
         }
         _atomic_json_write(os.path.join(staging_dir, 'final_report.json'), final_report)
@@ -920,7 +935,7 @@ def _ensure_fresh_result_dir(result_dir, resume):
 @torch.no_grad()
 def evaluate(model, loader, device, use_amp, criterion, max_batches=None,
              target_space='absolute', amp_dtype=torch.bfloat16,
-             use_channels_last=False):
+             use_channels_last=False, temporal_downstream=False):
     """返回 typed :class:`EvaluationOutput`。
 
     absolute      : absolute_mpjpe = 官方无对齐 MPJPE (Table 3 口径),
@@ -939,7 +954,9 @@ def evaluate(model, loader, device, use_amp, criterion, max_batches=None,
     for bi, batch in enumerate(loader):
         if max_batches is not None and bi >= max_batches:
             break
-        csi = batch['input_wifi-csi'].unsqueeze(1).to(device, dtype=torch.float, non_blocking=True)
+        csi = batch['input_wifi-csi'].to(device, dtype=torch.float, non_blocking=True)
+        if not temporal_downstream:
+            csi = csi.unsqueeze(1)
         # channels_last 仅对 4D 张量有效; 本模型输入为 5D (内部才重塑为 4D),
         # 故此处仅在罕见的 4D 情形生效, 5D 时为安全 no-op (详见训练循环注释)。
         if use_channels_last and csi.dim() == 4:
@@ -1317,6 +1334,44 @@ def train_one_experiment(dataset_root, config, result_dir, device,
         test_ds = configured_val_ds
         train_ds, select_ds, split_meta = split_train_select_by_sequence(
             train_ds_full, val_fraction=val_fraction, seed=split_seed)
+    temporal_downstream = bool(config.get("temporal_downstream", False))
+    if temporal_downstream:
+        if data_manifest is None:
+            raise ValueError("temporal_downstream requires an audited data_manifest")
+        if bool(config.get("train_shuffle_targets", False)):
+            raise ValueError("train_shuffle_targets is incompatible with temporal_downstream")
+
+        def sequence_keys_from_dataset(dataset):
+            while isinstance(dataset, torch.utils.data.Subset):
+                indices = dataset.indices
+                dataset = dataset.dataset
+                return frozenset(
+                    sequence_key_from_item(dataset.data_list[index]) for index in indices
+                )
+            return frozenset(sequence_key_from_item(item) for item in dataset.data_list)
+
+        from WIFIJEPA.cross_sence.models import TemporalWindowPoseDataset
+        temporal_kwargs = {
+            "dataset_root": dataset_root,
+            "context_frames": int(config["temporal_downstream_context_frames"]),
+            "future_frames": int(config["temporal_downstream_future_frames"]),
+            "protocol": config["protocol"],
+            "split": config["split_to_use"],
+            "scope": data_manifest.scope,
+            "manifest_fingerprint": data_manifest.fingerprint(),
+        }
+        train_ds = TemporalWindowPoseDataset(
+            sequence_keys=sequence_keys_from_dataset(train_ds), **temporal_kwargs
+        )
+        select_ds = TemporalWindowPoseDataset(
+            sequence_keys=sequence_keys_from_dataset(select_ds), **temporal_kwargs
+        )
+        test_ds = TemporalWindowPoseDataset(
+            sequence_keys=sequence_keys_from_dataset(test_ds), **temporal_kwargs
+        )
+        split_meta['train_samples'] = len(train_ds)
+        split_meta['select_samples'] = len(select_ds)
+
     if bool(config.get("train_shuffle_targets", False)):
         train_ds = ShuffledTargetDataset(
             train_ds, seed=int(config.get("train_shuffle_seed", split_seed))
@@ -1350,11 +1405,12 @@ def train_one_experiment(dataset_root, config, result_dir, device,
         prefetch_factor=prefetch_factor,
         sequence_balanced=bool(config.get("train_sequence_balanced", False)),
         frames_per_sequence=int(config.get("train_frames_per_sequence", 16)),
+        temporal=temporal_downstream,
     )
     select_loader = make_dataloader(select_ds, False, eval_rng, vbs, min(num_workers, 2),
-                                    prefetch_factor=prefetch_factor)
+                                  prefetch_factor=prefetch_factor, temporal=temporal_downstream)
     test_loader = make_dataloader(test_ds, False, eval_rng, vbs, min(num_workers, 2),
-                                  prefetch_factor=prefetch_factor)
+                                  prefetch_factor=prefetch_factor, temporal=temporal_downstream)
     P(f"[数据] Train: {n_train:,} / {split_meta['train_sequences']} seq "
       f"({len(train_loader)} batches) | Select: {n_select:,} / "
       f"{split_meta['select_sequences']} seq ({len(select_loader)} batches) | "
@@ -1483,12 +1539,29 @@ def train_one_experiment(dataset_root, config, result_dir, device,
                    "strategy": asdict(fine_tune_strategy) if is_dataclass(fine_tune_strategy) else None},
         context=experiment_context, artifacts=experiment_artifacts,
     )
+    provenance = build_run_provenance(
+        result_dir=result_dir,
+        stage=("finetune" if run_identity is not None and run_identity.method != "sup" else "supervised"),
+        config=config,
+        execution={
+            **execution_spec,
+            "config_fingerprint": cfg_fingerprint,
+            "execution_fingerprint": execution_fingerprint,
+        },
+        context=experiment_context,
+        artifacts=experiment_artifacts,
+        identity=run_identity,
+    )
+    write_run_provenance(result_dir, provenance)
 
     if device.type == 'cuda' and not resume:
         P("[预热] 前向+反向 smoke ...")
         was_training = model.training
         model.eval()
-        dummy = torch.randn(bs, 1, 3, 114, 10, device=device)
+        dummy = torch.randn(
+            bs, int(config.get('temporal_downstream_window_frames', 1)), 3, 114, 10,
+            device=device,
+        ) if temporal_downstream else torch.randn(bs, 1, 3, 114, 10, device=device)
         dummy_gt = torch.randn(bs, 17, 3, device=device)
         try:
             with torch.amp.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
@@ -1516,7 +1589,10 @@ def train_one_experiment(dataset_root, config, result_dir, device,
         # eval 模式且不反向, 不污染 BatchNorm 统计。
         was_training = model.training
         model.eval()
-        probe = torch.randn(bs, 1, 3, 114, 10, device=device)
+        probe = torch.randn(
+            bs, int(config.get('temporal_downstream_window_frames', 1)), 3, 114, 10,
+            device=device,
+        ) if temporal_downstream else torch.randn(bs, 1, 3, 114, 10, device=device)
         try:
             with torch.amp.autocast('cuda', dtype=amp_dtype, enabled=use_amp):
                 model(probe)
@@ -1707,7 +1783,9 @@ def train_one_experiment(dataset_root, config, result_dir, device,
         for bi, batch in enumerate(train_loader):
             if max_train_batches is not None and bi >= max_train_batches:
                 break
-            csi = batch['input_wifi-csi'].unsqueeze(1).to(device, dtype=torch.float, non_blocking=True)
+            csi = batch['input_wifi-csi'].to(device, dtype=torch.float, non_blocking=True)
+            if not temporal_downstream:
+                csi = csi.unsqueeze(1)
             # channels_last 仅对 4D 张量有效。本模型输入为 5D (B,1,3,114,10),
             # 内部切片/转置/flatten 后才成 4D 再进入 conv; 真正的布局优化由
             # model.to(memory_format=channels_last) 在 conv 权重层面完成。此处对 5D
@@ -1745,7 +1823,8 @@ def train_one_experiment(dataset_root, config, result_dir, device,
             evaluation = evaluate(
                 model, select_loader, device, use_amp, criterion, max_val_batches,
                 target_space=target_space, amp_dtype=amp_dtype,
-                use_channels_last=use_channels_last)
+                use_channels_last=use_channels_last,
+                temporal_downstream=temporal_downstream)
             val_loss = evaluation.average_loss
             mpjpe = evaluation.metrics.absolute_mpjpe_mm
             pampjpe = evaluation.metrics.pa_mpjpe_mm
@@ -1875,6 +1954,7 @@ def train_one_experiment(dataset_root, config, result_dir, device,
             split=config['split_to_use'],
             amp_dtype=amp_dtype,
             use_channels_last=use_channels_last,
+            temporal_downstream=temporal_downstream,
         )
         primary_summary = dict(final_report['roles'][CheckpointRole.ABSOLUTE.value])
         primary_metrics = primary_summary['test_metrics']
@@ -1913,7 +1993,8 @@ def train_one_experiment(dataset_root, config, result_dir, device,
                 _strip_orig_mod(ckpt['model_state_dict']), strict=False)
         test_evaluation = evaluate(
             model, test_loader, device, use_amp, criterion, target_space=target_space,
-            amp_dtype=amp_dtype, use_channels_last=use_channels_last)
+            amp_dtype=amp_dtype, use_channels_last=use_channels_last,
+            temporal_downstream=temporal_downstream)
         test_loss = test_evaluation.average_loss
         test_mpjpe = test_evaluation.metrics.absolute_mpjpe_mm
         test_pampjpe = test_evaluation.metrics.pa_mpjpe_mm

@@ -580,11 +580,25 @@ def _preload_worker_init(worker_id):
         ds._preload_packed_csi()
 
 
+def collate_temporal_pose(batch):
+    """Collate temporal CSI windows and their anchor-frame pose targets."""
+    return {
+        'modality': ['wifi-csi'],
+        'scene': [sample['scene'] for sample in batch],
+        'subject': [sample['subject'] for sample in batch],
+        'action': [sample['action'] for sample in batch],
+        'idx': [sample['idx'] for sample in batch],
+        'output': torch.stack([sample['output'] for sample in batch]),
+        'input_wifi-csi': torch.stack([sample['input_wifi-csi'] for sample in batch]),
+    }
+
+
 def make_dataloader(dataset, is_training, generator, batch_size, num_workers=8,
                     prefetch_factor=4, sequence_balanced=False,
-                    frames_per_sequence=16):
+                    frames_per_sequence=16, temporal=False):
     """?? DataLoader????????????????"""
-    kwargs = dict(batch_size=batch_size, collate_fn=collate_fn_padd,
+    kwargs = dict(batch_size=batch_size,
+                  collate_fn=collate_temporal_pose if temporal else collate_fn_padd,
                   drop_last=is_training, generator=generator,
                   pin_memory=True, num_workers=num_workers)
     if is_training and sequence_balanced:

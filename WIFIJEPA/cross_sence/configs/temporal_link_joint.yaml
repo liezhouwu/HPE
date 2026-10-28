@@ -2,7 +2,7 @@ experiment:
   dataset_root: ../my_dataset
   audit_root: WIFIJEPA/audit
   pretrain_root: WIFIJEPA/cross_sence/runs/pretrain
-  finetune_root: WIFIJEPA/cross_sence/runs/finetune
+  finetune_root: WIFIJEPA/result_metafi_ssl
   protocol: protocol3
   scope: strict
   split: cross_scene_split
@@ -22,6 +22,7 @@ input:
   disable_normalization: false
 
 model:
+  # Validated v7 baseline.
   embed_dim: 768
   depth: 6
   num_heads: 6
@@ -37,6 +38,15 @@ pretrain:
   sequence_fraction: 0.2
   context_frames: 4
   future_frames: 2
+  temporal_architecture: anchor_residual_temporal_v7_stable_v2_joint
+  temporal_depth: 1
+  # v7 exactly restores v2's fixed joint mask distribution.  The failed
+  # link-only curriculum is disabled because it destabilized temporal CLS.
+  temporal_readout_input: masked
+  link_mask_probability: 0.0
+  # Keep the original frame-equivalent compute budget.  The temporal model batches
+  # frame encoding and uses a temporal token, so full-window epochs are no
+  # longer required to make the temporal objective trainable.
   match_frame_compute_budget: true
   epochs: 10
   batch_size: 8
@@ -44,11 +54,15 @@ pretrain:
   lr_min: 0.00001
   learning_rate: 0.00024
   weight_decay: 0.01
+  max_grad_norm: 1.0
   ema_start: 0.996
   ema_end: 1.0
 
 finetune:
   encoder_readout: cls
+  temporal_downstream: true
+  temporal_batch_size: 32
+  temporal_validation_batch_size: 32
   epochs: 25
   num_workers: 0
   val_every: 5

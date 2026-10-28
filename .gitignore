@@ -32,6 +32,7 @@
 !/WIFIJEPA/scripts/*.py
 !/WIFIJEPA/cross_sence/
 !/WIFIJEPA/cross_sence/*.py
+!/WIFIJEPA/cross_sence/共享链路与连续时间方案总结.md
 !/WIFIJEPA/cross_sence/configs/
 !/WIFIJEPA/cross_sence/configs/*.yaml
 !/dataset/

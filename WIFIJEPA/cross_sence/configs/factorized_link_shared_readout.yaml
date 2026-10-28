@@ -2,11 +2,11 @@ experiment:
   dataset_root: ../my_dataset
   audit_root: WIFIJEPA/audit
   pretrain_root: WIFIJEPA/cross_sence/runs/pretrain
-  finetune_root: WIFIJEPA/cross_sence/runs/finetune
+  finetune_root: WIFIJEPA/result_metafi_ssl
   protocol: protocol3
   scope: strict
   split: cross_scene_split
-  label_budget: 4shot
+  label_budget: 1shot
   seed: 42
   device: cuda
   num_workers: 0
@@ -34,6 +34,8 @@ mask:
 
 pretrain:
   variant: factorized_link_shared
+  objective_version: shared_residual_projected_norm_v3
+  shared_latent_norm: true
   sequence_fraction: 0.2
   epochs: 10
   batch_size: 32
@@ -45,6 +47,7 @@ pretrain:
   ema_end: 1.0
   residual_loss_weight: 1.0
   shared_std_floor: 0.25
+  max_grad_norm: 1.0
 
 finetune:
   # Separate readout ablation; do not use this for the main pretraining-only comparison.
