@@ -1,0 +1,19 @@
+# This configuration runs both tokenizer pretraining jobs sequentially.
+# Both tokenizers use the audited MM-Fi source split.
+pretrain:
+  device: cuda
+  epochs: 200
+  batch_size: 128
+  seed: 42
+  csi:
+    source: audited_mmfi
+    dataset_root: ../my_dataset
+    audit_config: MY_SOTA/RePos_Decoupled/config.yaml
+    dataset_fraction: 0.2
+    temporal_weight: 0.05
+    output: MY_SOTA/RePos_Decoupled/pretrained/csi_tokenizer_u20_v3.pth
+  pose:
+    source: audited_mmfi
+    dataset_root: ../my_dataset
+    audit_config: MY_SOTA/RePos_Decoupled/config.yaml
+    output: MY_SOTA/RePos_Decoupled/pretrained/pose_tokenizer_h36m_v3.pth

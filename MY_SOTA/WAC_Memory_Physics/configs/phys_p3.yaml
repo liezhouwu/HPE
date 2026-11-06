@@ -1,0 +1,50 @@
+method: WAC-Memory-Physics
+experiment:
+  dataset_root: ../my_dataset
+  manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/data_manifest.json
+  label_manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/fewshot_manifest.json
+  protocol: protocol3
+  split: cross_scene_split
+  scope: strict
+  seed: 42
+  label_budget: 4shot
+  device: cuda
+  run_type: formal
+  pretrain_fraction: 0.2
+  pretrain_epochs: 20
+  epochs: 25
+  batch_size: 64
+  memory_batch_size: 128
+  num_workers: 0
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  min_learning_rate: 0.00001
+  amp: true
+  resume: true
+  max_pretrain_batches: 0
+  max_train_batches: 0
+  log_interval: 50
+  grad_clip: 1.0
+model:
+  dim: 128
+  top_k: 8
+  max_align: 0.35
+  temperature: 0.1
+  physical_weight: 0.3
+  neighbor_sigma: 0.15
+  positive_k: 64
+loss:
+  retrieval_weight: 0.1
+  anchor_weight: 1.0
+pretraining:
+  link_drop: 0.1
+  band_drop: 0.15
+  gain_range: 0.03
+  offset_range: 0.005
+  nuisance_weight: 0.05
+  consistency_weight: 0.02
+  variance_weight: 0.1
+artifacts:
+  pretrain_root: MY_SOTA/WAC_Memory_Physics/results/pretrain_20pct_v2/seed42
+  pretrain_checkpoint: MY_SOTA/WAC_Memory_Physics/results/pretrain_20pct_v2/seed42/pretrain_encoder.pth
+  finetune_root: MY_SOTA/WAC_Memory_Physics/results/protocol3/cross_scene_split/seed42/b4s_v2

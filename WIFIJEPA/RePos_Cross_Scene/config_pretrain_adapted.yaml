@@ -1,0 +1,33 @@
+experiment:
+  dataset_root: ../my_dataset
+  audit_root: WIFIJEPA/audit
+  output_root: WIFIJEPA/RePos_Cross_Scene/runs_adapted_pretrain/protocol3/cross_scene_split/seed42
+  protocol: protocol3
+  scope: strict
+  split: cross_scene_split
+  label_budget: 4shot
+  seed: 42
+  device: cuda
+input:
+  subcarriers: 114
+  time: 10
+  links: 3
+  disable_normalization: false
+model:
+  embed_dim: 256
+  depth: 4
+  num_heads: 8
+  ffn_dim: 1024
+pretrain:
+  sequence_fraction: 0.2
+  epochs: 10
+  batch_size: 64
+  learning_rate: 0.0003
+  lr_min: 0.00001
+  weight_decay: 0.0001
+  ema: 0.996
+  mask_links: 1
+  lambda_body: 1.0
+  lambda_consistency: 0.5
+  lambda_residual: 0.5
+  lambda_stats: 0.2

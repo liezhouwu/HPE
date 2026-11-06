@@ -1,0 +1,52 @@
+experiment:
+  dataset_root: ../my_dataset
+  audit_root: WIFIJEPA/audit
+  output_root: MY_SOTA/RePos_Decoupled/results_latent_decoder_v3
+  protocol: protocol3
+  scope: strict
+  split: cross_scene_split
+  label_budget: 4shot
+  seed: 42
+  device: cuda
+
+input:
+  subcarriers: 114
+  time: 10
+  links: 3
+  disable_normalization: false
+
+model:
+  variant: csi_pose_decoupled
+  embed_dim: 256
+  depth: 4
+  num_heads: 8
+  ffn_dim: 1024
+  predictor_depth: 2
+  translator_depth: 2
+  query_depth: 1
+  sga_depth: 4
+  gcn_layers: 3
+  joint_attention_layers: 2
+  n_angle: 90
+  phase_mode: paper
+  delay_mode: full_spectrum
+  pose_decode: tokenizer
+  freeze_tokenizers: true
+
+pretrain:
+  csi_checkpoint: MY_SOTA/RePos_Decoupled/pretrained/csi_tokenizer_u20_v3.pth
+  pose_checkpoint: MY_SOTA/RePos_Decoupled/pretrained/pose_tokenizer_h36m_v3.pth
+  source_manifest: MY_SOTA/RePos_Decoupled/pretrain.yaml
+
+finetune:
+  batch_size: 64
+  eval_batch_size: 128
+  translator_epochs: 15
+  root_epochs: 15
+  translator_lr: 0.0003
+  root_lr: 0.0003
+  weight_decay: 0.0001
+  latent_weight: 0.1
+  limb_weight: 0.1
+  root_weight: 1.0
+  amp: true

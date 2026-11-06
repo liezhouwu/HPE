@@ -1,0 +1,64 @@
+﻿method: ICDTS
+
+experiment:
+  dataset_root: ../my_dataset
+  manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/data_manifest.json
+  label_manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/fewshot_manifest.json
+  protocol: protocol3
+  split: cross_scene_split
+  scope: strict
+  seed: 42
+  label_budget: 4shot
+  window_frames: 6
+  window_offsets: [-5, -4, -3, -2, -1, 0]
+  target_frame: last
+  window_stride: 1
+  matched_frame_budget: true
+  device: cuda
+  epochs: 25
+  batch_size: 32
+  num_workers: 0
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  scheduler: cosine
+  min_learning_rate: 0.00001
+  amp: true
+  resume: false
+  max_train_batches: 0
+  max_val_batches: 0
+  max_test_batches: 0
+
+observation:
+  n_links: 3
+  n_subcarriers: 114
+  n_time: 10
+  calibration_dim: 12
+  prior_dim: 64
+  use_amplitude_prior: true
+  fast_dim: 128
+  slow_dim: 64
+
+state:
+  body_dim: 128
+  channel_dim: 64
+  channel_update: slow_ema_gru
+  channel_alpha_init: -2.1972  # sigmoid ≈ 0.10
+
+loss:
+  pose_weight: 1.0
+  velocity_weight: 0.25
+  acceleration_weight: 0.10
+  bone_length_weight: 0.10
+  observation_weight: 0.10
+  intervention_weight: 0.20
+  root_decomposition_weight: 0.25
+
+metrics:
+  primary: [absolute_mpjpe, pa_mpjpe]
+
+artifacts:
+  output_root: MY_SOTA/results/icdts/protocol3/cross_scene_split/seed42/b4s_calibrated_decomp
+  checkpoint: best_absolute.pth
+  last_state: last_state.pth
+  final_report: final_report.json
+

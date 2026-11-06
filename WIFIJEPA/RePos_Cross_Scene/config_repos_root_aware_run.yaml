@@ -1,0 +1,37 @@
+experiment:
+  dataset_root: ../my_dataset
+  audit_root: WIFIJEPA/audit
+  output_root: WIFIJEPA/RePos_Cross_Scene/runs_repos_root_aware
+  protocol: protocol3
+  scope: strict
+  split: cross_scene_split
+  label_budget: 4shot
+  seed: 42
+  device: cuda
+  aspn_root_aware_checkpoint: WIFIJEPA/RePos_Cross_Scene/runs_root_aware_pretrain/protocol3/cross_scene_split/seed42/aspn_root_aware.pth
+  aspn_root_aware_load: phase
+input:
+  subcarriers: 114
+  time: 10
+  links: 3
+  disable_normalization: false
+model:
+  embed_dim: 256
+  depth: 4
+  num_heads: 8
+  ffn_dim: 1024
+  query_depth: 1
+  dropout: 0.0
+  n_angle: 90
+  phase_mode: paper
+finetune:
+  batch_size: 64
+  eval_batch_size: 128
+  stage1_epochs: 8
+  stage2_epochs: 10
+  stage1_lr: 0.0003
+  stage2_lr: 0.0003
+  weight_decay: 0.0001
+  limb_weight: 0.1
+  root_weight: 1.0
+  amp: true

@@ -1,0 +1,29 @@
+experiment:
+  dataset_root: ../my_dataset
+  manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/data_manifest.json
+  label_manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/fewshot_manifest.json
+  seed: 42
+  device: cuda
+  batch_size: 64
+  num_workers: 4
+  statistics_stride: 30
+  prior_rank: 16
+  epochs: 25
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  log_interval: 100
+model:
+  dim: 256
+  nuisance_dim: 8
+training:
+  unroll_steps: 2
+  radio_weight: 0.2
+inference:
+  steps: 8
+  learning_rate: 0.2
+  weights:
+    pose_prior: 0.05
+    nuisance: 0.01
+    trust: 0.1
+artifacts:
+  output_root: MY_SOTA/RadioInversePose/results/protocol3/cross_scene_split/seed42/b4s

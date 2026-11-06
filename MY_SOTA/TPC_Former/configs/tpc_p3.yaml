@@ -1,0 +1,30 @@
+﻿method: TPC-Former
+
+experiment:
+  dataset_root: ../my_dataset
+  manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/data_manifest.json
+  label_manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/fewshot_manifest.json
+  protocol: protocol3
+  split: cross_scene_split
+  scope: strict
+  seed: 42
+  label_budget: 4shot
+  device: cuda
+  epochs: 25
+  batch_size: 64
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  max_train_batches: 0
+  max_select_batches: 0
+  max_test_batches: 0
+
+model:
+  hidden_dim: 128
+  phase_dropout: 0.10
+
+loss:
+  root_weight: 4.0
+
+artifacts:
+  output_root: MY_SOTA/TPC_Former/results/protocol3/cross_scene_split/seed42/b4s
+

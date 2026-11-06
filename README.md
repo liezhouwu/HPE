@@ -263,3 +263,17 @@ WIFIJEPA/cross_sence/runs/finetune/
 ```
 
 `encoder.pth` 用于下游初始化；`metrics.csv` 和 `final_report.json` 用于记录 absolute MPJPE、root0-relative MPJPE 与 PA-MPJPE。审计 manifest、checkpoint、日志、数据集和正式结果目录均属于本地运行产物。E04 test 只用于最终评估，不用于 checkpoint 或超参数选择。
+
+## 扩展模型与 MY_SOTA
+
+`WIFIJEPA/Scene-Decoupled_Geometric_JEPA/` 包含场景解耦几何 JEPA 的模型、预训练和下游微调入口。`WIFIJEPA/RePos_Cross_Scene/` 包含 RePos 跨场景姿态模型及其预训练和训练配置。
+
+`MY_SOTA/` 汇集跨场景姿态估计的模型实现，包括 RePos 基线、RePos 结构解耦实验，以及 CAGE-Pose、TPC-Former、WAC-CSI、SeqCalibPose 等研究实现。各目录中的 YAML 是对应训练入口的配置；这些方法处于不同实验阶段，不能仅凭目录名称推断性能。
+
+例如，从仓库根目录运行 RePos 基线：
+
+```powershell
+python MY_SOTA/RePos/train.py --config MY_SOTA/RePos/config.yaml
+```
+
+运行前需准备 MM-Fi 数据和与配置中协议、划分及标签预算一致的审计清单，并按本机环境调整数据路径。`MY_SOTA/RePos_Decoupled/pretrain.yaml` 定义 CSI 与姿态 tokenizer 的预训练，`config.yaml` 引用由此生成的 checkpoint；数据、审计文件、checkpoint 和运行输出均需在本地准备或生成。

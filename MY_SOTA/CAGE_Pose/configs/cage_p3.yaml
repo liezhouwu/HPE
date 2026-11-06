@@ -1,0 +1,45 @@
+method: CAGE-Pose
+
+experiment:
+  dataset_root: ../my_dataset
+  manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/data_manifest.json
+  label_manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/fewshot_manifest.json
+  protocol: protocol3
+  split: cross_scene_split
+  scope: strict
+  seed: 42
+  label_budget: 4shot
+  device: cuda
+  epochs: 25
+  batch_size: 64
+  num_workers: 0
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  min_learning_rate: 0.00001
+  amp: true
+  resume: true
+  log_interval: 50
+  max_train_batches: 0
+  max_select_batches: 0
+  max_test_batches: 0
+
+model:
+  dim: 128
+  calibration_dim: 12
+  root_components: 4
+
+loss:
+  root_weight: 2.0
+  relative_weight: 1.0
+  bone_weight: 0.10
+  consistency_weight: 0.20
+  domain_weight: 0.05
+
+metrics:
+  primary: [absolute_mpjpe, pa_mpjpe]
+
+artifacts:
+  output_root: MY_SOTA/CAGE_Pose/results/protocol3/cross_scene_split/seed42/b4s
+  checkpoint: best_absolute.pth
+  last_state: last_state.pth
+  final_report: final_report.json

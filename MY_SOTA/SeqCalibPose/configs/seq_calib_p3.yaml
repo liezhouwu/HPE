@@ -1,0 +1,35 @@
+method: SeqCalibPose
+
+experiment:
+  dataset_root: ../my_dataset
+  manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/data_manifest.json
+  label_manifest: result_metafi_ssl/runs/protocol3/strict/cross_scene_split/seed42/audit/b4s/fewshot_manifest.json
+  protocol: protocol3
+  split: cross_scene_split
+  scope: strict
+  seed: 42
+  label_budget: 4shot
+  device: cuda
+  epochs: 30
+  batch_size: 64
+  num_workers: 4
+  prefetch_factor: 2
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  min_learning_rate: 0.00001
+  max_train_batches: 0
+  max_select_batches: 0
+  max_test_batches: 0
+
+model:
+  dim: 160
+  root_residual_limit: 0.45
+
+loss:
+  relative_weight: 2.0
+  root_weight: 8.0
+  absolute_weight: 1.0
+  bone_weight: 0.25
+
+artifacts:
+  output_root: MY_SOTA/SeqCalibPose/results/protocol3/cross_scene_split/seed42/b4s

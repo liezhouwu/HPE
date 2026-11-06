@@ -1,0 +1,62 @@
+﻿experiment:
+  dataset_root: ../my_dataset
+  audit_root: WIFIJEPA/audit
+  output_root: MY_SOTA/RePos/results/aspn_legacy_restored
+  protocol: protocol3
+  scope: strict
+  split: cross_scene_split
+  label_budget: 4shot
+  seed: 42
+  device: cuda
+
+input:
+  subcarriers: 114
+  time: 10
+  links: 3
+  disable_normalization: false
+
+dataset:
+  train_sequence_scope: internal_train
+  train_sequences: 108
+  select_sequences: 81
+  test_sequences: 270
+  frames_per_sequence: 297
+  train_frames: 32076
+  select_frames: 24057
+  test_frames: 80190
+
+model:
+  variant: repos_paper_aligned_v2
+  embed_dim: 256
+  depth: 4
+  num_heads: 8
+  ffn_dim: 1024
+  query_depth: 1
+  sga_depth: 4
+  gcn_layers: 3
+  joint_attention_layers: 2
+  dropout: 0.0
+  n_angle: 90
+  phase_mode: paper
+  delay_mode: legacy_truncate
+
+finetune:
+  batch_size: 64
+  eval_batch_size: 128
+  stage1_epochs: 25
+  stage2_epochs: 15
+  stage1_lr: 0.0001
+  stage2_lr: 0.0003
+  weight_decay: 0.02
+  limb_weight: 0.1
+  root_weight: 1.0
+  warmup_epochs: 2
+  temporal_jitter: 1
+  noise_std: 0.01
+  log_every_batches: 100
+  early_stop_patience: 20
+  amp: true
+
+
+
+

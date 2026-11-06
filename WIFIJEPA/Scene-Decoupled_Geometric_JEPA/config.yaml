@@ -1,0 +1,73 @@
+﻿experiment:
+  dataset_root: ../my_dataset
+  audit_root: WIFIJEPA/audit
+  pretrain_root: WIFIJEPA/Scene-Decoupled_Geometric_JEPA/runs/pretrain
+  finetune_root: WIFIJEPA/Scene-Decoupled_Geometric_JEPA/new_result
+  protocol: protocol3
+  scope: strict
+  split: cross_scene_split
+  label_budget: 4shot
+  seed: 42
+  device: cuda
+  num_workers: 0
+  mode: scene_decoupled_jepa
+  baseline_config: configs/baseline_config.yaml
+
+input:
+  channels: 3
+  subcarriers: 114
+  time: 10
+  links: 3
+  amplitude_only: true
+  use_existing_preprocess: true
+  disable_normalization: false
+
+model:
+  embed_dim: 384
+  depth: 4
+  num_heads: 6
+  ffn_dim: 1536
+  dropout: 0.0
+  predictor_depth: 1
+
+mask:
+  masked_links: 1
+
+pretrain:
+  variant: scene_decoupled_jepa
+  sequence_fraction: 0.2
+  epochs: 10
+  batch_size: 32
+  amp: true
+  lr_min: 0.00001
+  learning_rate: 0.00024
+  weight_decay: 0.01
+  ema_start: 0.996
+  ema_end: 1.0
+  lambda_body: 1.0
+  lambda_adv: 0.05
+  lambda_layout: 0.10
+  lambda_orth: 0.01
+  mask_links: 1
+  scene_count: 3
+
+finetune:
+  epochs: 25
+  num_workers: 0
+  val_every: 5
+  optimizer: adamw
+  learning_rate: 0.0003
+  weight_decay: 0.0
+  scheduler: cosine
+  lr_min: 0.000001
+  dropout_p: 0.0
+  selection_metric: mpjpe
+  early_stopping_patience: 10
+  use_epoch_patience: false
+  loss_name: mse
+  relative_aux_weight: 0.5
+  bone_length_weight: 0.05
+  n_joints: 17
+  query_depth: 2
+  query_heads: 6
+  freeze_encoder_epochs: 0

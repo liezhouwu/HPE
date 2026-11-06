@@ -1,0 +1,52 @@
+﻿method: EIL-JEPA
+
+experiment:
+  protocol: protocol3
+  split: cross_scene_split
+  scope: strict
+  seed: 42
+  label_budget: 4shot
+  pretrain_sequence_fraction: 0.20
+  pretrain_epochs: 100
+  finetune_epochs: 25
+  device: cuda
+
+model:
+  n_subcarriers: 114
+  n_time: 10
+  n_links: 3
+  embed_dim: 768
+  depth: 6
+  num_heads: 6
+  ffn_dim: 3072
+  predictor_depth: 2
+  masked_links: 1
+  n_environments: 3
+
+loss:
+  invariant_weight: 1.0
+  environment_weight: 0.05
+  temporal_weight: 0.10
+  grl_scale: 1.0
+  target_momentum_start: 0.996
+  target_momentum_end: 1.0
+
+augmentation:
+  gain_std: 0.12
+  offset_std: 0.04
+  subcarrier_drop: 0.08
+  time_jitter: 1
+
+downstream:
+  architecture: factorized_content_style
+  dropout: 0.10
+  root_loss_weight: 1.0
+  relative_loss_weight: 1.0
+  bone_loss_weight: 0.10
+  selection_metric: absolute_mpjpe
+
+artifacts:
+  output_root: MY_SOTA/results
+  pretrain_checkpoint: encoder.pth
+  downstream_checkpoint: best_absolute.pth
+
